@@ -238,36 +238,40 @@ export const TelegramMiniAppService = {
       formattedDate = `${dd}.${mm}.${yyyy}`;
     }
 
-    const dayId = crypto.randomUUID();
-    const dayRecord = {
-      id: dayId,
-      profileId: targetProfile.id,
-      date: formattedDate,
-      crew: flight.crew ? String(flight.crew).trim() : '',
-      isClosed: 0,
-      createdAt: Date.now(),
-    };
+    // Проверяем, существует ли уже запись для этого дня (по profileId и date)
+    let dayRecord = exchange.tables.days.find(
+      (d: any) => String(d.profileId) === String(targetProfile.id) && String(d.date) === String(formattedDate),
+    );
 
-    // Очищаем любые повреждённые дни, где были лишние поля или отсутствовали обязательные
-    if (Array.isArray(exchange.tables.days)) {
-      exchange.tables.days = exchange.tables.days
-        .filter((d: any) => d && typeof d === 'object')
-        .map((d: any) => ({
-          id: String(d.id || crypto.randomUUID()),
-          profileId: String(d.profileId || targetProfile.id),
-          date: String(d.date || formattedDate),
-          crew: String(d.crew || ''),
-          isClosed: d.isClosed ? 1 : 0,
-          createdAt: Number(d.createdAt || Date.now()),
-        }));
+    let dayId: string;
+    if (dayRecord) {
+      dayId = dayRecord.id;
+      if (flight.crew) {
+        dayRecord.crew = String(flight.crew).trim();
+      }
+    } else {
+      dayId = crypto.randomUUID();
+      dayRecord = {
+        id: dayId,
+        profileId: targetProfile.id,
+        date: formattedDate,
+        crew: flight.crew ? String(flight.crew).trim() : '',
+        isClosed: 0,
+        createdAt: Date.now(),
+      };
+      exchange.tables.days.push(dayRecord);
     }
 
-    exchange.tables.days.push(dayRecord);
+    // Существующие запуски этого дня
+    const currentDayLaunches = exchange.tables.launches.filter((l: any) => String(l.dayId) === String(dayId));
+    let nextOrder = currentDayLaunches.length > 0
+      ? Math.max(...currentDayLaunches.map((l: any) => Number(l.order || 0))) + 1
+      : 0;
 
-    let totalAirMinutes = 0;
-    flight.launches.forEach((launch, idx) => {
+    let addedAirMinutes = 0;
+    flight.launches.forEach((launch) => {
       const air = Number(launch.vozduh || 0);
-      totalAirMinutes += air;
+      addedAirMinutes += air;
       const liters = Number(launch.fuelingLiters || 0);
       const density = Number(launch.fuelDensity || 0);
       const kg = liters > 0 && density > 0 ? Number((liters * density).toFixed(2)) : 0;
@@ -275,7 +279,7 @@ export const TelegramMiniAppService = {
       const launchRecord: Record<string, any> = {
         id: crypto.randomUUID(),
         dayId: dayId,
-        order: idx,
+        order: nextOrder++,
         vsu: Number(launch.vsu || 0),
         zemlya: Number(launch.zemlya || 0),
         vozduh: air,
@@ -303,7 +307,9 @@ export const TelegramMiniAppService = {
       exchange.tables.launches.push(launchRecord);
     });
 
+    // Обновляем СНК (перезаписываем или добавляем)
     if (flight.snk && Object.keys(flight.snk).length > 0) {
+      exchange.tables.snk_values = exchange.tables.snk_values.filter((s: any) => String(s.dayId) !== String(dayId));
       exchange.tables.snk_values.push({
         id: crypto.randomUUID(),
         dayId: dayId,
@@ -322,7 +328,7 @@ export const TelegramMiniAppService = {
       });
     }
 
-    targetProfile.fuselageSne = Number(targetProfile.fuselageSne || 0) + totalAirMinutes;
+    targetProfile.fuselageSne = Number(targetProfile.fuselageSne || 0) + addedAirMinutes;
     targetProfile.updatedAt = Date.now();
 
     const changeId = crypto.randomUUID();
