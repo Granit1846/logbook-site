@@ -328,7 +328,82 @@ export const TelegramMiniAppService = {
       });
     }
 
-    targetProfile.fuselageSne = Number(targetProfile.fuselageSne || 0) + addedAirMinutes;
+    // Определяем базовый СНЭ фюзеляжа
+    let baseSne = Number(targetProfile.fuselageSne || 0);
+    if (!baseSne && Array.isArray(exchange.tables.chast1_records)) {
+      const pRecords = exchange.tables.chast1_records
+        .filter((r: any) => String(r.profileId) === String(targetProfile.id) && !r.isTotal && Number(r.colSNE || 0) > 0)
+        .sort((a: any, b: any) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0));
+      if (pRecords.length > 0) {
+        baseSne = Number(pRecords[pRecords.length - 1].colSNE || 0);
+      } else if (Array.isArray(exchange.tables.chast1_start)) {
+        const startRec = exchange.tables.chast1_start.find((r: any) => String(r.profileId) === String(targetProfile.id));
+        if (startRec) {
+          baseSne = Number(startRec.colSNE || 0);
+        }
+      }
+    }
+
+    const newFuselageSne = baseSne + addedAirMinutes;
+    targetProfile.fuselageSne = newFuselageSne;
+
+    // Пересчитываем СНЭ и остатки агрегатов в resourcesJson
+    let resources: any[] = [];
+    if (typeof targetProfile.resourcesJson === 'string') {
+      try {
+        resources = JSON.parse(targetProfile.resourcesJson);
+      } catch {
+        resources = [];
+      }
+    } else if (Array.isArray(targetProfile.resourcesJson)) {
+      resources = targetProfile.resourcesJson;
+    }
+
+    if (Array.isArray(resources) && resources.length > 0) {
+      const updatedResources = resources.map((item: any, idx: number) => {
+        const isFuselage = item.name === 'Фюзеляж' || idx === 0;
+        const inst1 = Number(item.installedAtSne1 || 0);
+        const inst2 = Number(item.installedAtSne2 || 0);
+
+        // Для фюзеляжа — СНЭ равен налёту планера.
+        // Для остальных агрегатов:
+        // Если агрегат установлен с наработками: currentSne = newFuselageSne - inst1 + inst2
+        // Иначе: СНЭ агрегата увеличивается на налёт addedAirMinutes
+        let currentSne: number;
+        if (isFuselage) {
+          currentSne = newFuselageSne;
+        } else if (inst1 > 0 || inst2 > 0) {
+          currentSne = Math.max(0, newFuselageSne - inst1 + inst2);
+        } else {
+          const prevSne = Number(item.sne || 0);
+          currentSne = prevSne > 0 ? prevSne + addedAirMinutes : newFuselageSne;
+        }
+
+        // Назначенный ресурс в минутах (extendedTo1)
+        const rawLimit = Number(item.extendedTo1 || 0);
+        const hasHourLimit = rawLimit > 0;
+        const remaining1 = hasHourLimit ? rawLimit - currentSne : 0;
+
+        let emptyFields: string[] = Array.isArray(item.emptyFields) ? [...item.emptyFields] : [];
+        if (currentSne > 0) {
+          emptyFields = emptyFields.filter((f) => f !== 'sne');
+        }
+        if (hasHourLimit) {
+          emptyFields = emptyFields.filter((f) => f !== 'remaining1');
+        }
+
+        return {
+          ...item,
+          sne: currentSne,
+          remaining1: remaining1,
+          emptyFields: emptyFields,
+        };
+      });
+
+      targetProfile.resourcesJson = JSON.stringify(updatedResources);
+    }
+
+    targetProfile.resourcesUpdatedAt = Date.now();
     targetProfile.updatedAt = Date.now();
 
     const changeId = crypto.randomUUID();
