@@ -239,7 +239,7 @@ export const TelegramMiniAppService = {
     }
 
     const dayId = crypto.randomUUID();
-    const dayRecord: Record<string, any> = {
+    const dayRecord = {
       id: dayId,
       profileId: targetProfile.id,
       date: formattedDate,
@@ -248,18 +248,18 @@ export const TelegramMiniAppService = {
       createdAt: Date.now(),
     };
 
-    // Если в существующей таблице days есть другие поля или нет каких-то, подстраиваемся
-    if (existingDay) {
-      for (const k of Object.keys(existingDay)) {
-        if (!(k in dayRecord)) {
-          dayRecord[k] = typeof existingDay[k] === 'number' ? 0 : '';
-        }
-      }
-      for (const k of Object.keys(dayRecord)) {
-        if (!(k in existingDay)) {
-          delete dayRecord[k];
-        }
-      }
+    // Очищаем любые повреждённые дни, где были лишние поля или отсутствовали обязательные
+    if (Array.isArray(exchange.tables.days)) {
+      exchange.tables.days = exchange.tables.days
+        .filter((d: any) => d && typeof d === 'object')
+        .map((d: any) => ({
+          id: String(d.id || crypto.randomUUID()),
+          profileId: String(d.profileId || targetProfile.id),
+          date: String(d.date || formattedDate),
+          crew: String(d.crew || ''),
+          isClosed: d.isClosed ? 1 : 0,
+          createdAt: Number(d.createdAt || Date.now()),
+        }));
     }
 
     exchange.tables.days.push(dayRecord);
@@ -342,6 +342,43 @@ export const TelegramMiniAppService = {
     }
 
     this.saveFlight(flight);
+
+    return { revision: Number(reply.revision) };
+  },
+
+  async clearCloudDays(): Promise<{ revision: number }> {
+    const sessionRes = await supabase.auth.getSession();
+    const user = sessionRes?.data?.session?.user;
+    if (!user) {
+      throw new Error('Не выполнен вход в аккаунт!');
+    }
+
+    const { data, error } = await supabase.rpc('logbook_sync_pull_v1');
+    if (error) throw new Error(error.message);
+
+    const response = Array.isArray(data) ? data[0] : data;
+    const currentRevision = Number(response?.revision ?? 0);
+    const payloadValue = response?.payload;
+    if (!payloadValue) throw new Error('В облаке нет данных');
+
+    const exchange = typeof payloadValue === 'string' ? JSON.parse(payloadValue) : payloadValue;
+    if (!exchange?.tables) throw new Error('Некорректный формат');
+
+    // Очищаем таблицы полётов за дни
+    exchange.tables.days = [];
+    exchange.tables.launches = [];
+    exchange.tables.snk_values = [];
+
+    const changeId = crypto.randomUUID();
+    const { data: commitData, error: commitError } = await supabase.rpc('logbook_sync_commit_v1', {
+      p_change_id: changeId,
+      p_expected_revision: currentRevision,
+      p_payload: exchange,
+    });
+
+    if (commitError) throw new Error(commitError.message);
+    const reply = Array.isArray(commitData) ? commitData[0] : commitData;
+    if (!reply?.accepted) throw new Error('Конфликт синхронизации. Попробуйте еще раз.');
 
     return { revision: Number(reply.revision) };
   },
