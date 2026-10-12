@@ -50,6 +50,8 @@ export interface CloudAggregateResource {
   extendedTo2?: string;
   remaining1?: number;
   remaining2?: string;
+  installedAtSne1?: number;
+  installedAtSne2?: number;
   emptyFields?: string[];
 }
 

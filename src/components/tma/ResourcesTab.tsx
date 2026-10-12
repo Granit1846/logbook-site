@@ -270,11 +270,31 @@ const TrafficLightBar = ({
 // ==========================================
 // Карточка агрегата
 // ==========================================
-const AggregateCard: React.FC<{ item: CloudProfileData['aggregates'][0] }> = ({ item }) => {
+const AggregateCard: React.FC<{
+  item: CloudProfileData['aggregates'][0];
+  fuselageSne: number;
+  isFirst?: boolean;
+}> = ({ item, fuselageSne, isFirst }) => {
   const [showDates, setShowDates] = useState(false);
 
-  // СНЭ агрегата
-  const sne = Number(item.sne || 0);
+  // СНЭ агрегата: рассчитывается динамически от налёта планера (точно как в маслах)
+  const isFuselage = isFirst || item.name === 'Фюзеляж';
+  const inst1 = Number(item.installedAtSne1 || 0);
+  const inst2 = Number(item.installedAtSne2 || 0);
+
+  let sne: number;
+  if (fuselageSne > 0) {
+    if (isFuselage) {
+      sne = fuselageSne;
+    } else if (inst1 > 0 || inst2 > 0) {
+      sne = Math.max(0, fuselageSne - inst1 + inst2);
+    } else {
+      const baseSne = Number(item.sne || 0);
+      sne = baseSne > fuselageSne ? baseSne : fuselageSne;
+    }
+  } else {
+    sne = Number(item.sne || 0);
+  }
 
   // Назначенный ресурс (extendedTo1). Если не задан или <= 0 — ресурса в часах нет!
   const rawLimit = Number(item.extendedTo1 || 0);
@@ -870,7 +890,12 @@ export const ResourcesTab: React.FC<ResourcesTabProps> = ({ profile, loading, er
         <div className="space-y-2.5">
           {profile.aggregates.length === 0 && <Empty text="В профиле нет данных об агрегатах" />}
           {profile.aggregates.map((item, index) => (
-            <AggregateCard key={index} item={item} />
+            <AggregateCard
+              key={index}
+              item={item}
+              fuselageSne={profile.fuselageSne}
+              isFirst={index === 0}
+            />
           ))}
         </div>
       )}
