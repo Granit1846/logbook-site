@@ -19,34 +19,59 @@ function App() {
   const content = useSiteContent();
   const [isTmaMode, setIsTmaMode] = useState(() => {
     if (typeof window === 'undefined') return false;
-    const url = new URL(window.location.href);
-    const hash = window.location.hash;
-    const search = window.location.search;
+    const hash = window.location.hash.toLowerCase();
+    const search = window.location.search.toLowerCase();
+    const pathname = window.location.pathname.toLowerCase();
     
-    // Проверяем Telegram WebApp напрямую
+    // Проверяем Telegram параметры в URL (включая #tgWebAppData от Telegram)
     const hasTgInUrl = 
       hash.includes('tg') || 
       search.includes('tg') || 
       search.includes('telegram') ||
-      url.pathname.includes('/tg');
+      pathname.includes('/tg');
 
-    // Проверяем Telegram User-Agent или наличие window.Telegram
+    // Проверяем Telegram WebApp окружение
+    const tg = (window as any).Telegram?.WebApp;
     const isTgBrowser = 
       /Telegram/i.test(navigator.userAgent) || 
-      Boolean((window as any).Telegram?.WebApp?.initData) ||
-      Boolean((window as any).TelegramWebviewProxy);
+      Boolean(tg?.initData) ||
+      Boolean(tg?.initDataUnsafe?.user) ||
+      Boolean((window as any).TelegramWebviewProxy) ||
+      (Boolean(tg?.platform) && tg.platform !== 'unknown');
 
     return hasTgInUrl || isTgBrowser;
   });
 
   useEffect(() => {
+    const checkTg = () => {
+      const hash = window.location.hash.toLowerCase();
+      const search = window.location.search.toLowerCase();
+      const tg = (window as any).Telegram?.WebApp;
+      if (
+        hash.includes('tg') ||
+        search.includes('tg') ||
+        Boolean(tg?.initData) ||
+        Boolean(tg?.initDataUnsafe?.user) ||
+        (Boolean(tg?.platform) && tg.platform !== 'unknown') ||
+        Boolean((window as any).TelegramWebviewProxy)
+      ) {
+        setIsTmaMode(true);
+      }
+    };
+
+    checkTg();
+    const timer = setTimeout(checkTg, 200);
+
     const handleHash = () => {
-      if (window.location.hash === '#tg') {
+      if (window.location.hash.toLowerCase().includes('tg')) {
         setIsTmaMode(true);
       }
     };
     window.addEventListener('hashchange', handleHash);
-    return () => window.removeEventListener('hashchange', handleHash);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('hashchange', handleHash);
+    };
   }, []);
 
   if (isTmaMode) {
