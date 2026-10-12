@@ -10,8 +10,10 @@ import {
   Gauge,
   NotebookText,
   RefreshCw,
+  History,
+  CheckCircle2,
 } from 'lucide-react';
-import type { CloudProfileData } from '@/lib/tmaService';
+import type { CloudProfileData, CloudOilResource, CloudMaintenanceWork } from '@/lib/tmaService';
 
 interface ResourcesTabProps {
   profile?: CloudProfileData;
@@ -28,13 +30,13 @@ const formatMinutes = (value?: number) => {
 };
 
 const workKind: Record<string, string> = {
-  PERIODIC: 'Периодические работы',
-  HOURS_50: '50-часовые работы',
-  HOURS_100: '100-часовые работы',
-  HOURS_300: '300-часовые работы',
+  PERIODIC: 'Периодические работы (20 дн.)',
+  HOURS_50: '50-часовой регламент',
+  HOURS_100: '100-часовой регламент',
+  HOURS_300: '300-часовой регламент',
   REG_12: 'Регламент 12 месяцев',
   REG_24: 'Регламент 24 месяца',
-  OTHER: 'Прочие работы',
+  OTHER: 'Прочие технические работы',
 };
 
 interface DateCalcResult {
@@ -185,7 +187,7 @@ const TrafficLightBar = ({ percent, status }: { percent: number; status: 'normal
           <div className="w-[15%] bg-[#FFD60A]" />
           <div className="w-[10%] bg-[#FF453A]" />
         </div>
-        {/* Заполняющийся прогресс расхода СНЭ */}
+        {/* Заполняющийся прогресс расхода ресурса */}
         <div
           className="relative h-full rounded-full transition-all duration-300"
           style={{
@@ -204,6 +206,9 @@ const TrafficLightBar = ({ percent, status }: { percent: number; status: 'normal
   );
 };
 
+// ==========================================
+// Карточка агрегата
+// ==========================================
 const AggregateCard: React.FC<{ item: CloudProfileData['aggregates'][0] }> = ({ item }) => {
   const [showDates, setShowDates] = useState(false);
 
@@ -286,7 +291,7 @@ const AggregateCard: React.FC<{ item: CloudProfileData['aggregates'][0] }> = ({ 
               color={statusColor}
             />
           </div>
-          {/* Нижний ряд: Дата окончания (Дата выпуска + Назначенный) */}
+          {/* Нижний ряд: Дата окончания */}
           <Metric
             label="Дата окончания"
             value={dateCalc?.expiryDateStr || (item.yearsResource ? `Срок: ${item.yearsResource} л.` : '—')}
@@ -305,11 +310,326 @@ const AggregateCard: React.FC<{ item: CloudProfileData['aggregates'][0] }> = ({ 
   );
 };
 
+// ==========================================
+// Карточка масла (1 в 1 по аналогии с агрегатами)
+// ==========================================
+const OilCard: React.FC<{ item: CloudOilResource; fuselageSne: number }> = ({ item, fuselageSne }) => {
+  const [showDates, setShowDates] = useState(false);
+
+  // Расчёт ресурса (часы:минуты)
+  const pouredAtSne = Number(item.byHours || 0);
+  const used = Math.max(0, fuselageSne - pouredAtSne);
+  const limit = Number(item.coefficient || 0);
+  const remaining = limit - used;
+
+  const percentConsumed = limit > 0 ? (used / limit) * 100 : 0;
+  const percentRemaining = limit > 0 ? (remaining / limit) * 100 : 0;
+
+  let hourStatus: 'normal' | 'warning' | 'critical' | 'expired' = 'normal';
+  if (limit > 0 && remaining < 0) {
+    hourStatus = 'expired';
+  } else if (limit > 0 && (remaining <= 20 * 60 || percentRemaining <= 5)) {
+    hourStatus = 'critical';
+  } else if (limit > 0 && (remaining <= 50 * 60 || percentRemaining <= 10)) {
+    hourStatus = 'warning';
+  } else {
+    hourStatus = 'normal';
+  }
+
+  // Расчёт дат (дата заливки + срок службы в годах)
+  const dateCalc = calculateDates(item.byYears, item.term);
+
+  const currentStatus = showDates && dateCalc ? dateCalc.status : hourStatus;
+  const statusColor =
+    currentStatus === 'expired' || currentStatus === 'critical'
+      ? '#FF453A'
+      : currentStatus === 'warning'
+      ? '#FFD60A'
+      : '#30D158';
+
+  return (
+    <article className="space-y-3 rounded-2xl border border-[#3A3A3C] bg-[#2A2A2D] p-3.5 shadow-sm transition-colors">
+      {/* Шапка: Кликабельное имя масла + статусная иконка */}
+      <div className="flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={() => setShowDates((prev) => !prev)}
+          className="group flex flex-1 items-center gap-1.5 text-left transition-colors"
+          title="Нажмите, чтобы переключить между часами и датами"
+        >
+          <Droplets className="h-4 w-4 shrink-0 text-[#229ED9] group-hover:scale-110 transition-transform" />
+          <span className="text-[14px] font-bold text-[#F0F0F0] group-hover:text-[#229ED9] transition-colors">
+            {item.name || 'Без названия'}
+          </span>
+          <span className="flex items-center gap-0.5 rounded-md bg-[#1C1C1E] px-1.5 py-0.5 text-[10px] font-medium text-[#888] group-hover:text-[#229ED9] transition-colors">
+            {showDates ? <Calendar className="h-3 w-3" /> : <Clock3 className="h-3 w-3" />}
+            <span>{showDates ? 'Даты' : 'Часы'}</span>
+          </span>
+        </button>
+        <div className="shrink-0 flex items-center justify-center p-1 rounded-full bg-[#1C1C1E]/50">
+          <StatusIcon status={currentStatus} />
+        </div>
+      </div>
+
+      {/* Поля карточки: 2 поля сверху (СНЭ наработки и Остаток), снизу 1 поле (Ресурс / Дата окончания) */}
+      {!showDates ? (
+        <div className="space-y-2">
+          {/* Верхний ряд: 2 поля — СНЭ (наработка масла) и Остаток */}
+          <div className="grid grid-cols-2 gap-2">
+            <Metric label="СНЭ (наработка)" value={formatMinutes(used)} />
+            <Metric
+              label="Остаток"
+              value={formatMinutes(remaining)}
+              color={statusColor}
+            />
+          </div>
+          {/* Нижний ряд: Ресурс */}
+          <div className="relative">
+            <Metric label="Ресурс" value={formatMinutes(limit)} />
+            {pouredAtSne > 0 && (
+              <span className="absolute bottom-1 right-2.5 text-[9px] text-[#666]">
+                залито при СНЭ {formatMinutes(pouredAtSne)}
+              </span>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {/* Верхний ряд: 2 поля — Дата заливки и Остаток */}
+          <div className="grid grid-cols-2 gap-2">
+            <Metric label="Дата заливки" value={dateCalc?.issueDateStr || item.byYears || '—'} />
+            <Metric
+              label="Остаток"
+              value={dateCalc?.remainingStr || '—'}
+              color={statusColor}
+            />
+          </div>
+          {/* Нижний ряд: Дата окончания (Дата заливки + Срок) */}
+          <Metric
+            label="Дата окончания"
+            value={dateCalc?.expiryDateStr || (item.term ? `Срок: ${item.term} г.` : '—')}
+          />
+        </div>
+      )}
+
+      {/* Полоса светофора */}
+      {limit > 0 && (
+        <TrafficLightBar
+          percent={percentConsumed}
+          status={hourStatus}
+        />
+      )}
+    </article>
+  );
+};
+
+// ==========================================
+// Карточка регламентной работы в Журнале (1 в 1 по аналогии)
+// ==========================================
+interface ScheduledDef {
+  kind: string;
+  name: string;
+  nominalHours?: number;
+  nominalDays?: number;
+  nominalMonths?: number;
+}
+
+const SCHEDULED_STANDARDS: ScheduledDef[] = [
+  { kind: 'HOURS_50', name: '50-часовой регламент', nominalHours: 50 },
+  { kind: 'HOURS_100', name: '100-часовой регламент', nominalHours: 100 },
+  { kind: 'HOURS_300', name: '300-часовой регламент', nominalHours: 300 },
+  { kind: 'PERIODIC', name: 'Периодический регламент', nominalDays: 20 },
+  { kind: 'REG_12', name: 'Регламент 12 месяцев', nominalMonths: 12 },
+  { kind: 'REG_24', name: 'Регламент 24 месяца', nominalMonths: 24 },
+];
+
+const ScheduledWorkCard: React.FC<{
+  def: ScheduledDef;
+  lastWork?: CloudMaintenanceWork;
+  fuselageSne: number;
+}> = ({ def, lastWork, fuselageSne }) => {
+  const [showDates, setShowDates] = useState(false);
+
+  const isHourly = !!def.nominalHours;
+  const limitMinutes = (def.nominalHours || 0) * 60;
+
+  // Часовой расчет
+  const lastCounter = Number(lastWork?.counterMinutes || 0);
+  const usedHours = Math.max(0, fuselageSne - lastCounter);
+  const remainingHours = isHourly ? limitMinutes - usedHours : 0;
+  const percentHours = limitMinutes > 0 ? (usedHours / limitMinutes) * 100 : 0;
+  const percentRemainingHours = limitMinutes > 0 ? (remainingHours / limitMinutes) * 100 : 0;
+
+  let hourStatus: 'normal' | 'warning' | 'critical' | 'expired' = 'normal';
+  if (isHourly) {
+    if (remainingHours < 0) {
+      hourStatus = 'expired';
+    } else if (remainingHours <= 10 * 60 || percentRemainingHours <= 5) {
+      hourStatus = 'critical';
+    } else if (remainingHours <= 25 * 60 || percentRemainingHours <= 10) {
+      hourStatus = 'warning';
+    } else {
+      hourStatus = 'normal';
+    }
+  }
+
+  // Расчет дат
+  let dateCalc: DateCalcResult | null = null;
+  if (lastWork?.date) {
+    if (def.nominalMonths) {
+      dateCalc = calculateDates(lastWork.date, String(def.nominalMonths / 12));
+    } else if (def.nominalDays) {
+      const baseDate = parseCustomDate(lastWork.date);
+      if (baseDate) {
+        const expiry = new Date(baseDate);
+        expiry.setDate(expiry.getDate() + def.nominalDays);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        expiry.setHours(0, 0, 0, 0);
+        const diffDays = Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+        dateCalc = {
+          issueDateStr: formatCustomDate(baseDate),
+          expiryDateStr: formatCustomDate(expiry),
+          remainingStr: diffDays < 0 ? `Просрочено (${Math.abs(diffDays)} дн.)` : `${diffDays} дн.`,
+          daysRemaining: diffDays,
+          status: diffDays < 0 ? 'expired' : diffDays <= 5 ? 'critical' : diffDays <= 15 ? 'warning' : 'normal',
+        };
+      }
+    } else if (isHourly) {
+      // Для часовых регламентов в режиме дат показываем дату последнего выполнения
+      const baseDate = parseCustomDate(lastWork.date);
+      if (baseDate) {
+        dateCalc = {
+          issueDateStr: formatCustomDate(baseDate),
+          expiryDateStr: 'По наработке СНЭ',
+          remainingStr: formatMinutes(remainingHours),
+          daysRemaining: 99999,
+          status: hourStatus,
+        };
+      }
+    }
+  }
+
+  const currentStatus =
+    showDates && dateCalc
+      ? dateCalc.status
+      : isHourly
+      ? hourStatus
+      : dateCalc?.status || 'normal';
+
+  const statusColor =
+    currentStatus === 'expired' || currentStatus === 'critical'
+      ? '#FF453A'
+      : currentStatus === 'warning'
+      ? '#FFD60A'
+      : '#30D158';
+
+  return (
+    <article className="space-y-3 rounded-2xl border border-[#3A3A3C] bg-[#2A2A2D] p-3.5 shadow-sm transition-colors">
+      {/* Шапка: Кликабельное имя регламента + статусная иконка */}
+      <div className="flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={() => setShowDates((prev) => !prev)}
+          className="group flex flex-1 items-center gap-1.5 text-left transition-colors"
+          title="Нажмите, чтобы переключить между часами и датами"
+        >
+          <NotebookText className="h-4 w-4 shrink-0 text-[#229ED9] group-hover:scale-110 transition-transform" />
+          <span className="text-[14px] font-bold text-[#F0F0F0] group-hover:text-[#229ED9] transition-colors">
+            {def.name}
+          </span>
+          <span className="flex items-center gap-0.5 rounded-md bg-[#1C1C1E] px-1.5 py-0.5 text-[10px] font-medium text-[#888] group-hover:text-[#229ED9] transition-colors">
+            {showDates ? <Calendar className="h-3 w-3" /> : <Clock3 className="h-3 w-3" />}
+            <span>{showDates ? 'Даты' : 'Часы'}</span>
+          </span>
+        </button>
+        <div className="shrink-0 flex items-center justify-center p-1 rounded-full bg-[#1C1C1E]/50">
+          <StatusIcon status={currentStatus} />
+        </div>
+      </div>
+
+      {/* Поля карточки: 2 поля сверху (СНЭ и Остаток), снизу 1 поле (Ресурс / Дата окончания) */}
+      {!showDates ? (
+        <div className="space-y-2">
+          {/* Верхний ряд: 2 поля — Наработка с ТО и Остаток */}
+          <div className="grid grid-cols-2 gap-2">
+            <Metric
+              label={isHourly ? 'СНЭ (наработка)' : 'СНЭ планера'}
+              value={formatMinutes(isHourly ? usedHours : fuselageSne)}
+            />
+            <Metric
+              label="Остаток"
+              value={isHourly ? formatMinutes(remainingHours) : dateCalc?.remainingStr || '—'}
+              color={statusColor}
+            />
+          </div>
+          {/* Нижний ряд: Ресурс / Интервал */}
+          <div className="relative">
+            <Metric
+              label="Интервал ТО"
+              value={
+                isHourly
+                  ? formatMinutes(limitMinutes)
+                  : def.nominalDays
+                  ? `${def.nominalDays} дн.`
+                  : def.nominalMonths
+                  ? `${def.nominalMonths} мес.`
+                  : '—'
+              }
+            />
+            {lastWork && (
+              <span className="absolute bottom-1 right-2.5 text-[9px] text-[#666]">
+                выполнено при СНЭ {formatMinutes(lastCounter)}
+              </span>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {/* Верхний ряд: 2 поля — Дата выполнения и Остаток */}
+          <div className="grid grid-cols-2 gap-2">
+            <Metric label="Дата последнего ТО" value={lastWork?.date || 'Не выполнялось'} />
+            <Metric
+              label="Остаток"
+              value={dateCalc?.remainingStr || (isHourly ? formatMinutes(remainingHours) : '—')}
+              color={statusColor}
+            />
+          </div>
+          {/* Нижний ряд: Дата окончания / следующий срок */}
+          <Metric
+            label="Следующий срок ТО"
+            value={
+              dateCalc?.expiryDateStr ||
+              (isHourly && limitMinutes > 0
+                ? `При СНЭ ${formatMinutes(lastCounter + limitMinutes)}`
+                : '—')
+            }
+          />
+        </div>
+      )}
+
+      {/* Полоса светофора */}
+      {isHourly && limitMinutes > 0 && (
+        <TrafficLightBar
+          percent={percentHours}
+          status={hourStatus}
+        />
+      )}
+    </article>
+  );
+};
+
 export const ResourcesTab: React.FC<ResourcesTabProps> = ({ profile, loading, error, onRefresh }) => {
   const [section, setSection] = useState<'aggregates' | 'oils' | 'journal'>('aggregates');
+  const [journalView, setJournalView] = useState<'due' | 'history'>('due');
 
   if (loading) {
-    return <div className="flex items-center justify-center gap-2 px-3 py-12 text-[13px] text-[#999]"><RefreshCw className="h-4 w-4 animate-spin" />Загрузка данных профиля…</div>;
+    return (
+      <div className="flex items-center justify-center gap-2 px-3 py-12 text-[13px] text-[#999]">
+        <RefreshCw className="h-4 w-4 animate-spin" />
+        Загрузка данных профиля…
+      </div>
+    );
   }
 
   if (error) {
@@ -317,7 +637,12 @@ export const ResourcesTab: React.FC<ResourcesTabProps> = ({ profile, loading, er
       <div className="m-3 rounded-2xl border border-[#FF453A]/30 bg-[#FF453A]/10 p-4 text-center text-[12px] text-[#FF8A83]">
         <AlertTriangle className="mx-auto mb-2 h-5 w-5" />
         <p>{error}</p>
-        <button onClick={onRefresh} className="mt-3 h-10 rounded-xl bg-[#229ED9] px-4 font-semibold text-white">Повторить</button>
+        <button
+          onClick={onRefresh}
+          className="mt-3 h-10 rounded-xl bg-[#229ED9] px-4 font-semibold text-white"
+        >
+          Повторить
+        </button>
       </div>
     );
   }
@@ -338,22 +663,43 @@ export const ResourcesTab: React.FC<ResourcesTabProps> = ({ profile, loading, er
 
   return (
     <div className="space-y-3 px-3 pb-6 pt-3">
+      {/* Шапка борта */}
       <div className="flex items-center justify-between px-1">
         <div>
-          <h3 className="text-[12px] font-bold uppercase tracking-wider text-[#999]">Ресурсы борта №{profile.boardNumber}</h3>
-          <p className="mt-0.5 text-[10px] text-[#666]">Только просмотр · данные Supabase</p>
+          <h3 className="text-[12px] font-bold uppercase tracking-wider text-[#999]">
+            Ресурсы борта №{profile.boardNumber}
+          </h3>
+          <p className="mt-0.5 text-[10px] text-[#666]">
+            СНЭ планера: <b className="text-[#AAA] font-mono">{formatMinutes(profile.fuselageSne)}</b> · данные Supabase
+          </p>
         </div>
-        <button onClick={onRefresh} className="flex h-10 w-10 items-center justify-center rounded-lg text-[#229ED9] hover:bg-white/5" aria-label="Обновить ресурсы"><RefreshCw className="h-4 w-4" /></button>
+        <button
+          onClick={onRefresh}
+          className="flex h-10 w-10 items-center justify-center rounded-lg text-[#229ED9] hover:bg-white/5"
+          aria-label="Обновить ресурсы"
+        >
+          <RefreshCw className="h-4 w-4" />
+        </button>
       </div>
 
+      {/* Вкладки: Агрегаты / Масла / Журнал */}
       <div className="grid grid-cols-3 gap-1 rounded-xl border border-[#3A3A3C] bg-[#2A2A2D] p-1">
         {sections.map(({ id, label, icon: Icon, count }) => (
-          <button key={id} onClick={() => setSection(id)} className="flex min-h-11 items-center justify-center gap-1 rounded-lg px-1 text-[11px] font-semibold" style={{ backgroundColor: section === id ? '#229ED9' : 'transparent', color: section === id ? '#fff' : '#888' }}>
+          <button
+            key={id}
+            onClick={() => setSection(id)}
+            className="flex min-h-11 items-center justify-center gap-1 rounded-lg px-1 text-[11px] font-semibold transition-all"
+            style={{
+              backgroundColor: section === id ? '#229ED9' : 'transparent',
+              color: section === id ? '#fff' : '#888',
+            }}
+          >
             <Icon className="h-3.5 w-3.5" /> {label} <span className="text-[9px] opacity-70">{count}</span>
           </button>
         ))}
       </div>
 
+      {/* СЕКЦИЯ: АГРЕГАТЫ */}
       {section === 'aggregates' && (
         <div className="space-y-2.5">
           {profile.aggregates.length === 0 && <Empty text="В профиле нет данных об агрегатах" />}
@@ -363,45 +709,117 @@ export const ResourcesTab: React.FC<ResourcesTabProps> = ({ profile, loading, er
         </div>
       )}
 
+      {/* СЕКЦИЯ: МАСЛА (1 в 1 по аналогии) */}
       {section === 'oils' && (
         <div className="space-y-2.5">
           {profile.oils.length === 0 && <Empty text="В профиле нет данных о маслах" />}
-          {profile.oils.map((item, index) => {
-            const used = Math.max(0, profile.fuselageSne - Number(item.byHours || 0));
-            const limit = Number(item.coefficient || 0);
-            const remaining = limit - used;
-            const percent = limit > 0 ? Math.max(0, Math.min(100, remaining / limit * 100)) : 0;
-            const color = remaining < 0 ? '#FF453A' : percent <= 10 ? '#FF9F0A' : '#229ED9';
-            return (
-              <article key={index} className="space-y-2.5 rounded-2xl border border-[#3A3A3C] bg-[#2A2A2D] p-3">
-                <div className="flex items-start justify-between gap-2"><h4 className="text-[13px] font-semibold">{item.name || 'Без названия'}</h4><Droplets className="h-4 w-4 shrink-0" style={{ color }} /></div>
-                <div className="grid grid-cols-3 gap-2 text-center">
-                  <Metric label="Залито при СНЭ" value={formatMinutes(item.byHours)} />
-                  <Metric label="Ресурс" value={formatMinutes(limit)} />
-                  <Metric label="Остаток" value={formatMinutes(remaining)} color={color} />
-                </div>
-                {limit > 0 && <div className="h-1.5 overflow-hidden rounded-full bg-[#1C1C1E]"><div className="h-full rounded-full" style={{ width: `${percent}%`, backgroundColor: color }} /></div>}
-                <div className="flex gap-3 border-t border-[#3A3A3C] pt-2 text-[10px] text-[#777]"><span>Дата заливки: <b className="text-[#AAA]">{item.byYears || '—'}</b></span><span>Срок: <b className="text-[#AAA]">{item.term || '—'} г.</b></span></div>
-              </article>
-            );
-          })}
-        </div>
-      )}
-
-      {section === 'journal' && (
-        <div className="space-y-2.5">
-          {profile.maintenanceWorks.length === 0 && <Empty text="В журнале пока нет записей" />}
-          {[...profile.maintenanceWorks].sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)).map((work, index) => (
-            <article key={work.id || index} className="rounded-2xl border border-[#3A3A3C] bg-[#2A2A2D] p-3">
-              <div className="flex items-start justify-between gap-2"><span className="text-[10px] font-bold uppercase text-[#229ED9]">{workKind[work.kind || ''] || work.kind || 'Работа'}</span><span className="text-[10px] text-[#777]">{work.date || '—'}</span></div>
-              <p className="mt-2 text-[13px] leading-snug text-[#E5E5E5]">{work.description || 'Без описания'}</p>
-              <div className="mt-2 flex items-center gap-1 text-[10px] text-[#777]"><Clock3 className="h-3 w-3" /> СНЭ: <b className="text-[#AAA]">{formatMinutes(work.counterMinutes)}</b></div>
-            </article>
+          {profile.oils.map((item, index) => (
+            <OilCard
+              key={index}
+              item={item}
+              fuselageSne={profile.fuselageSne}
+            />
           ))}
         </div>
       )}
 
-      {profile.resourcesUpdatedAt > 0 && <p className="text-center text-[10px] text-[#555]">Обновлено: {new Date(profile.resourcesUpdatedAt).toLocaleString('ru-RU')}</p>}
+      {/* СЕКЦИЯ: ЖУРНАЛ */}
+      {section === 'journal' && (
+        <div className="space-y-3">
+          {/* Переключатель вида: Регламенты / История */}
+          <div className="flex gap-1.5 rounded-xl bg-[#1C1C1E] p-1">
+            <button
+              onClick={() => setJournalView('due')}
+              className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2 text-[11px] font-semibold transition-all ${
+                journalView === 'due' ? 'bg-[#2A2A2D] text-[#229ED9] shadow-sm' : 'text-[#888]'
+              }`}
+            >
+              <Clock3 className="h-3.5 w-3.5" />
+              <span>Контроль регламентов</span>
+            </button>
+            <button
+              onClick={() => setJournalView('history')}
+              className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2 text-[11px] font-semibold transition-all ${
+                journalView === 'history' ? 'bg-[#2A2A2D] text-[#229ED9] shadow-sm' : 'text-[#888]'
+              }`}
+            >
+              <History className="h-3.5 w-3.5" />
+              <span>История ТО ({profile.maintenanceWorks.length})</span>
+            </button>
+          </div>
+
+          {/* Вид 1: Контроль регламентов (карточки 1 в 1) */}
+          {journalView === 'due' && (
+            <div className="space-y-2.5">
+              {SCHEDULED_STANDARDS.map((def) => {
+                const candidates = profile.maintenanceWorks.filter(
+                  (w) => w.kind === def.kind || (def.kind === 'HOURS_50' && w.kind === 'HOURS_100')
+                );
+                // Находим последнее выполнение
+                const lastWork = candidates.sort((a, b) => {
+                  const bSne = Number(b.counterMinutes || 0);
+                  const aSne = Number(a.counterMinutes || 0);
+                  if (bSne !== aSne) return bSne - aSne;
+                  return Number(b.createdAt || 0) - Number(a.createdAt || 0);
+                })[0];
+
+                return (
+                  <ScheduledWorkCard
+                    key={def.kind}
+                    def={def}
+                    lastWork={lastWork}
+                    fuselageSne={profile.fuselageSne}
+                  />
+                );
+              })}
+            </div>
+          )}
+
+          {/* Вид 2: История записей журнала */}
+          {journalView === 'history' && (
+            <div className="space-y-2.5">
+              {profile.maintenanceWorks.length === 0 && <Empty text="В журнале пока нет записей о выполненных работах" />}
+              {[...profile.maintenanceWorks]
+                .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0))
+                .map((work, index) => (
+                  <article
+                    key={work.id || index}
+                    className="space-y-2.5 rounded-2xl border border-[#3A3A3C] bg-[#2A2A2D] p-3.5 shadow-sm"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="flex items-center gap-1 text-[11px] font-bold uppercase text-[#229ED9]">
+                        <CheckCircle2 className="h-3.5 w-3.5 text-[#30D158]" />
+                        {workKind[work.kind || ''] || work.kind || 'Техническая работа'}
+                      </span>
+                      <span className="text-[10px] text-[#777] font-mono">{work.date || '—'}</span>
+                    </div>
+
+                    {work.description && (
+                      <p className="text-[12px] leading-relaxed text-[#E5E5E5] bg-[#1C1C1E]/50 rounded-xl p-2.5 border border-[#3A3A3C]/40">
+                        {work.description}
+                      </p>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <Metric label="СНЭ выполнения" value={formatMinutes(work.counterMinutes)} />
+                      <Metric
+                        label="Наработка с тех пор"
+                        value={formatMinutes(Math.max(0, profile.fuselageSne - Number(work.counterMinutes || 0)))}
+                        color="#229ED9"
+                      />
+                    </div>
+                  </article>
+                ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {profile.resourcesUpdatedAt > 0 && (
+        <p className="text-center text-[10px] text-[#555]">
+          Обновлено: {new Date(profile.resourcesUpdatedAt).toLocaleString('ru-RU')}
+        </p>
+      )}
     </div>
   );
 };
@@ -413,4 +831,8 @@ const Metric = ({ label, value, color = '#F0F0F0' }: { label: string; value: str
   </div>
 );
 
-const Empty = ({ text }: { text: string }) => <div className="rounded-2xl border border-dashed border-[#3A3A3C] p-6 text-center text-[12px] text-[#777]">{text}</div>;
+const Empty = ({ text }: { text: string }) => (
+  <div className="rounded-2xl border border-dashed border-[#3A3A3C] p-6 text-center text-[12px] text-[#777]">
+    {text}
+  </div>
+);
