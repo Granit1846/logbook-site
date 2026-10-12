@@ -227,50 +227,98 @@ export const TelegramMiniAppService = {
       throw new Error(`Профиль борта №${flight.boardNumber} не найден в синхронизации LogBook. Убедитесь, что борт есть в основном приложении.`);
     }
 
+    // Образец существующих записей для получения точной схемы таблицы
+    const existingDay = exchange.tables.days[0];
+    const existingLaunch = exchange.tables.launches[0];
+
+    // Форматируем дату в DD.MM.YYYY если пришла YYYY-MM-DD
+    let formattedDate = flight.date;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(formattedDate)) {
+      const [yyyy, mm, dd] = formattedDate.split('-');
+      formattedDate = `${dd}.${mm}.${yyyy}`;
+    }
+
     const dayId = crypto.randomUUID();
-    const dayRecord = {
+    const dayRecord: Record<string, any> = {
       id: dayId,
       profileId: targetProfile.id,
-      date: flight.date,
-      notes: flight.crew ? `Экипаж: ${flight.crew}` : (flight.notes || ''),
-      oilAddedLiters: Number(flight.oilAddedLiters || 0),
+      date: formattedDate,
+      crew: flight.crew ? String(flight.crew).trim() : '',
+      isClosed: 0,
+      createdAt: Date.now(),
     };
+
+    // Если в существующей таблице days есть другие поля или нет каких-то, подстраиваемся
+    if (existingDay) {
+      for (const k of Object.keys(existingDay)) {
+        if (!(k in dayRecord)) {
+          dayRecord[k] = typeof existingDay[k] === 'number' ? 0 : '';
+        }
+      }
+      for (const k of Object.keys(dayRecord)) {
+        if (!(k in existingDay)) {
+          delete dayRecord[k];
+        }
+      }
+    }
+
     exchange.tables.days.push(dayRecord);
 
     let totalAirMinutes = 0;
-    for (const launch of flight.launches) {
+    flight.launches.forEach((launch, idx) => {
       const air = Number(launch.vozduh || 0);
       totalAirMinutes += air;
-      exchange.tables.launches.push({
+      const liters = Number(launch.fuelingLiters || 0);
+      const density = Number(launch.fuelDensity || 0);
+      const kg = liters > 0 && density > 0 ? Number((liters * density).toFixed(2)) : 0;
+
+      const launchRecord: Record<string, any> = {
         id: crypto.randomUUID(),
         dayId: dayId,
+        order: idx,
         vsu: Number(launch.vsu || 0),
         zemlya: Number(launch.zemlya || 0),
         vozduh: air,
         tp: Number(launch.tp || 0),
-        samoletLandings: Number(launch.samoletLandings || 0),
-        fuelingLiters: Number(launch.fuelingLiters || 0),
-        fuelDensity: Number(launch.fuelDensity || 0),
-        fuelStatement: String(launch.fuelStatement || ''),
-      });
-    }
+        samolet: Number(launch.samoletLandings || 0),
+        zapravkaLiters: liters,
+        zapravkaDensity: density,
+        zapravkaKg: kg,
+        vedCek: String(launch.fuelStatement || ''),
+      };
+
+      if (existingLaunch) {
+        for (const k of Object.keys(existingLaunch)) {
+          if (!(k in launchRecord)) {
+            launchRecord[k] = typeof existingLaunch[k] === 'number' ? 0 : '';
+          }
+        }
+        for (const k of Object.keys(launchRecord)) {
+          if (!(k in existingLaunch)) {
+            delete launchRecord[k];
+          }
+        }
+      }
+
+      exchange.tables.launches.push(launchRecord);
+    });
 
     if (flight.snk && Object.keys(flight.snk).length > 0) {
       exchange.tables.snk_values.push({
         id: crypto.randomUUID(),
         dayId: dayId,
-        aLeft: flight.snk.aLeft || 0,
-        bLeft: flight.snk.bLeft || 0,
-        eLeft: flight.snk.eLeft || 0,
-        gLeft: flight.snk.gLeft || 0,
-        hLeft: flight.snk.hLeft || 0,
-        iLeft: flight.snk.iLeft || 0,
-        aRight: flight.snk.aRight || 0,
-        bRight: flight.snk.bRight || 0,
-        eRight: flight.snk.eRight || 0,
-        gRight: flight.snk.gRight || 0,
-        hRight: flight.snk.hRight || 0,
-        iRight: flight.snk.iRight || 0,
+        aLeft: Number(flight.snk.aLeft || 0),
+        bLeft: Number(flight.snk.bLeft || 0),
+        eLeft: Number(flight.snk.eLeft || 0),
+        gLeft: Number(flight.snk.gLeft || 0),
+        hLeft: Number(flight.snk.hLeft || 0),
+        iLeft: Number(flight.snk.iLeft || 0),
+        aRight: Number(flight.snk.aRight || 0),
+        bRight: Number(flight.snk.bRight || 0),
+        eRight: Number(flight.snk.eRight || 0),
+        gRight: Number(flight.snk.gRight || 0),
+        hRight: Number(flight.snk.hRight || 0),
+        iRight: Number(flight.snk.iRight || 0),
       });
     }
 
