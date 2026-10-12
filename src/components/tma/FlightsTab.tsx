@@ -104,21 +104,27 @@ export const FlightsTab: React.FC<FlightsTabProps> = ({ activeBoard }) => {
         createdAt: Date.now(),
       };
 
-      TelegramMiniAppService.saveFlight(flightData);
+      // Отправляем прямо в облако Supabase!
+      const res = await TelegramMiniAppService.submitFlightToCloud(flightData);
       triggerHapticNotification('success');
 
       const tg = getTelegramWebApp();
+      const successMsg = `Полёты за ${formatDateDisplay(date)} (борт №${activeBoard}) успешно отправлены в базу LogBook (ревизия ${res.revision})! Теперь нажмите «Синхронизация» в приложении на телефоне/ПК.`;
       if (tg?.showAlert) {
-        tg.showAlert(`Полёты за ${date} (борт №${activeBoard}) успешно сохранены и готовы к синхронизации!`);
-      } else {
-        setStatusMessage({ text: 'Данные полётов успешно сохранены в облачную очередь LogBook!', type: 'success' });
+        tg.showAlert(successMsg);
       }
+      setStatusMessage({ text: successMsg, type: 'success' });
 
       setLaunches([createLaunch(Date.now().toString())]);
       setSnk({});
-    } catch {
+    } catch (err: any) {
       triggerHapticNotification('error');
-      setStatusMessage({ text: 'Ошибка сохранения данных', type: 'error' });
+      const errText = err instanceof Error ? err.message : 'Ошибка отправки данных';
+      setStatusMessage({ text: errText, type: 'error' });
+      const tg = getTelegramWebApp();
+      if (tg?.showAlert) {
+        tg.showAlert(errText);
+      }
     } finally {
       setIsSubmitting(false);
     }

@@ -192,6 +192,112 @@ export const TelegramMiniAppService = {
     localStorage.setItem(`${STORAGE_KEY_RESOURCES}_${boardNumber}`, JSON.stringify(resources));
   },
 
+  async submitFlightToCloud(flight: FlightEntryDraft): Promise<{ revision: number }> {
+    const sessionRes = await supabase.auth.getSession();
+    const user = sessionRes?.data?.session?.user;
+    if (!user) {
+      throw new Error('Не выполнен вход в аккаунт! Нажмите шестерёнку (Настройки) сверху и войдите в свой аккаунт LogBook.');
+    }
+
+    const { data, error } = await supabase.rpc('logbook_sync_pull_v1');
+    if (error) {
+      throw new Error(`Ошибка загрузки данных из облака: ${error.message}`);
+    }
+
+    const response = Array.isArray(data) ? data[0] : data;
+    const currentRevision = Number(response?.revision ?? 0);
+    const payloadValue = response?.payload;
+
+    if (!payloadValue) {
+      throw new Error('В облаке пока нет профилей борта. Сначала выполните синхронизацию в основном приложении LogBook (Android или Windows).');
+    }
+
+    const exchange = typeof payloadValue === 'string' ? JSON.parse(payloadValue) : payloadValue;
+    if (!exchange?.tables || typeof exchange.tables !== 'object') {
+      throw new Error('Некорректный формат синхронизации в облаке');
+    }
+
+    if (!Array.isArray(exchange.tables.profiles)) exchange.tables.profiles = [];
+    if (!Array.isArray(exchange.tables.days)) exchange.tables.days = [];
+    if (!Array.isArray(exchange.tables.launches)) exchange.tables.launches = [];
+    if (!Array.isArray(exchange.tables.snk_values)) exchange.tables.snk_values = [];
+
+    const targetProfile = exchange.tables.profiles.find((p: any) => String(p.boardNumber) === String(flight.boardNumber));
+    if (!targetProfile) {
+      throw new Error(`Профиль борта №${flight.boardNumber} не найден в синхронизации LogBook. Убедитесь, что борт есть в основном приложении.`);
+    }
+
+    const dayId = crypto.randomUUID();
+    const dayRecord = {
+      id: dayId,
+      profileId: targetProfile.id,
+      date: flight.date,
+      notes: flight.crew ? `Экипаж: ${flight.crew}` : (flight.notes || ''),
+      oilAddedLiters: Number(flight.oilAddedLiters || 0),
+    };
+    exchange.tables.days.push(dayRecord);
+
+    let totalAirMinutes = 0;
+    for (const launch of flight.launches) {
+      const air = Number(launch.vozduh || 0);
+      totalAirMinutes += air;
+      exchange.tables.launches.push({
+        id: crypto.randomUUID(),
+        dayId: dayId,
+        vsu: Number(launch.vsu || 0),
+        zemlya: Number(launch.zemlya || 0),
+        vozduh: air,
+        tp: Number(launch.tp || 0),
+        samoletLandings: Number(launch.samoletLandings || 0),
+        fuelingLiters: Number(launch.fuelingLiters || 0),
+        fuelDensity: Number(launch.fuelDensity || 0),
+        fuelStatement: String(launch.fuelStatement || ''),
+      });
+    }
+
+    if (flight.snk && Object.keys(flight.snk).length > 0) {
+      exchange.tables.snk_values.push({
+        id: crypto.randomUUID(),
+        dayId: dayId,
+        aLeft: flight.snk.aLeft || 0,
+        bLeft: flight.snk.bLeft || 0,
+        eLeft: flight.snk.eLeft || 0,
+        gLeft: flight.snk.gLeft || 0,
+        hLeft: flight.snk.hLeft || 0,
+        iLeft: flight.snk.iLeft || 0,
+        aRight: flight.snk.aRight || 0,
+        bRight: flight.snk.bRight || 0,
+        eRight: flight.snk.eRight || 0,
+        gRight: flight.snk.gRight || 0,
+        hRight: flight.snk.hRight || 0,
+        iRight: flight.snk.iRight || 0,
+      });
+    }
+
+    targetProfile.fuselageSne = Number(targetProfile.fuselageSne || 0) + totalAirMinutes;
+    targetProfile.updatedAt = Date.now();
+
+    const changeId = crypto.randomUUID();
+    const { data: commitData, error: commitError } = await supabase.rpc('logbook_sync_commit_v1', {
+      p_change_id: changeId,
+      p_expected_revision: currentRevision,
+      p_payload: exchange,
+    });
+
+    if (commitError) {
+      throw new Error(`Ошибка отправки в облако: ${commitError.message}`);
+    }
+
+    const reply = Array.isArray(commitData) ? commitData[0] : commitData;
+    if (!reply?.accepted) {
+      throw new Error('Конфликт синхронизации. Обновите данные и повторите отправку.');
+    }
+
+    this.saveFlight(flight);
+
+    return { revision: Number(reply.revision) };
+  },
+
   async getCloudProfiles(): Promise<CloudProfileData[]> {
     const { data, error } = await supabase.rpc('logbook_sync_pull_v1');
     if (error) throw new Error(error.message);

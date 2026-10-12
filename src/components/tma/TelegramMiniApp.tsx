@@ -112,6 +112,16 @@ export const TelegramMiniApp: React.FC = () => {
           </select>
           <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#777]" />
         </label>
+        {!user && (
+          <button
+            type="button"
+            onClick={() => { triggerHaptic('light'); setSettingsOpen(true); }}
+            className="mt-2.5 flex w-full items-center justify-between rounded-lg border border-[#FFD60A]/30 bg-[#FFD60A]/10 px-3 py-2 text-left text-[11px] text-[#FFD60A] transition-colors hover:bg-[#FFD60A]/20"
+          >
+            <span>Войдите в аккаунт для отправки данных в LogBook</span>
+            <span className="font-semibold underline">Войти ➔</span>
+          </button>
+        )}
       </div>
 
       <div className="mx-3 mt-2 flex rounded-xl border border-[#3A3A3C] bg-[#2A2A2D] p-1.5">
