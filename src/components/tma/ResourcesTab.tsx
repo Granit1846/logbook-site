@@ -31,26 +31,13 @@ const cleanStringOrDash = (val?: string): string => {
   return trimmed;
 };
 
-const formatMinutes = (value?: number | null, isEmpty?: boolean): string => {
-  if (isEmpty || value === undefined || value === null || !Number.isFinite(value)) {
+const formatMinutes = (value?: number | null): string => {
+  if (value === undefined || value === null || !Number.isFinite(value)) {
     return '—';
   }
   const sign = value < 0 ? '−' : '';
   const absolute = Math.abs(Math.round(value));
   return `${sign}${Math.floor(absolute / 60)}:${String(absolute % 60).padStart(2, '0')}`;
-};
-
-const isFieldEmpty = (val: unknown, fieldName: string, emptyFields?: string[]): boolean => {
-  if (emptyFields && emptyFields.includes(fieldName)) return true;
-  if (val === undefined || val === null) return true;
-  if (typeof val === 'string') {
-    const s = val.trim();
-    return s === '' || s === '0' || s === '—' || s === '-';
-  }
-  if (typeof val === 'number') {
-    return isNaN(val) || val <= 0;
-  }
-  return false;
 };
 
 const workKind: Record<string, string> = {
@@ -285,28 +272,28 @@ const TrafficLightBar = ({
 // ==========================================
 const AggregateCard: React.FC<{ item: CloudProfileData['aggregates'][0] }> = ({ item }) => {
   const [showDates, setShowDates] = useState(false);
-  const emptyFields = item.emptyFields || [];
 
-  // Проверка пустоты полей
-  const isSneEmpty = isFieldEmpty(item.sne, 'sne', emptyFields);
-  const isLimitEmpty = isFieldEmpty(item.extendedTo1, 'extendedTo1', emptyFields);
+  // СНЭ агрегата
+  const sne = Number(item.sne || 0);
 
-  const sne = isSneEmpty ? 0 : Number(item.sne);
-  const limit = isLimitEmpty ? 0 : Number(item.extendedTo1);
+  // Назначенный ресурс (extendedTo1). Если не задан или <= 0 — ресурса в часах нет!
+  const rawLimit = Number(item.extendedTo1 || 0);
+  const hasHourLimit = rawLimit > 0;
+  const limit = hasHourLimit ? rawLimit : 0;
 
-  // Расчёт ресурса (часы:минуты)
-  const hasHourResource = !isLimitEmpty && limit > 0;
-  const remaining = hasHourResource ? limit - sne : undefined;
+  // Остаток вычисляется ТОЛЬКО если задан ресурс в часах!
+  const remaining = hasHourLimit ? limit - sne : undefined;
 
+  // Статус по часам
   let hourStatus: 'normal' | 'warning' | 'critical' | 'expired' = 'normal';
-  if (hasHourResource && remaining !== undefined) {
+  if (hasHourLimit && remaining !== undefined) {
     hourStatus = getMinutesStatus(remaining, limit);
   }
 
-  // Расчёт дат
-  const hasIssueDate = !isFieldEmpty(item.issueDate, 'issueDate', emptyFields);
-  const hasYears = !isFieldEmpty(item.yearsResource, 'yearsResource', emptyFields);
-  const hasExtended2 = !isFieldEmpty(item.extendedTo2, 'extendedTo2', emptyFields);
+  // Расчет дат (только если задана дата выпуска и срок)
+  const hasIssueDate = !!(item.issueDate && cleanStringOrDash(item.issueDate) !== '—');
+  const hasYears = !!(item.yearsResource && cleanStringOrDash(item.yearsResource) !== '—');
+  const hasExtended2 = !!(item.extendedTo2 && cleanStringOrDash(item.extendedTo2) !== '—');
 
   const dateCalc = (hasIssueDate && (hasYears || hasExtended2))
     ? calculateDates(item.issueDate, item.yearsResource, item.extendedTo2)
@@ -314,8 +301,11 @@ const AggregateCard: React.FC<{ item: CloudProfileData['aggregates'][0] }> = ({ 
 
   const dateStatus = dateCalc ? dateCalc.status : 'normal';
 
+  // Текущий статус карточки
   const currentStatus = showDates ? dateStatus : hourStatus;
-  const isAnyExpired = (hasHourResource && hourStatus === 'expired') || (dateCalc && dateStatus === 'expired');
+
+  // Если один из параметров реально просрочен
+  const isAnyExpired = (hasHourLimit && hourStatus === 'expired') || (dateCalc && dateStatus === 'expired');
   const effectiveStatus = isAnyExpired && currentStatus === 'normal' ? 'warning' : currentStatus;
 
   const statusColor =
@@ -325,7 +315,7 @@ const AggregateCard: React.FC<{ item: CloudProfileData['aggregates'][0] }> = ({ 
       ? '#FFD60A'
       : '#30D158';
 
-  const percentConsumed = hasHourResource && limit > 0 ? (sne / limit) * 100 : (remaining !== undefined && remaining < 0) ? 100 : 0;
+  const percentConsumed = hasHourLimit ? (sne / limit) * 100 : 0;
 
   return (
     <article className="space-y-3 rounded-2xl border border-[#3A3A3C] bg-[#2A2A2D] p-3.5 shadow-sm transition-colors">
@@ -355,15 +345,15 @@ const AggregateCard: React.FC<{ item: CloudProfileData['aggregates'][0] }> = ({ 
         <div className="space-y-2">
           {/* Верхний ряд: 2 поля — СНЭ и Остаток */}
           <div className="grid grid-cols-2 gap-2">
-            <Metric label="СНЭ" value={formatMinutes(item.sne, isSneEmpty)} />
+            <Metric label="СНЭ" value={formatMinutes(sne)} />
             <Metric
               label="Остаток"
-              value={formatMinutes(remaining, !hasHourResource)}
+              value={remaining !== undefined ? formatMinutes(remaining) : '—'}
               color={remaining !== undefined && remaining < 0 ? '#FF453A' : statusColor}
             />
           </div>
           {/* Нижний ряд: Ресурс */}
-          <Metric label="Ресурс" value={formatMinutes(item.extendedTo1, isLimitEmpty)} />
+          <Metric label="Ресурс" value={hasHourLimit ? formatMinutes(limit) : '—'} />
         </div>
       ) : (
         <div className="space-y-2">
@@ -380,8 +370,8 @@ const AggregateCard: React.FC<{ item: CloudProfileData['aggregates'][0] }> = ({ 
           <Metric
             label="Дата окончания"
             value={
-              dateCalc?.expiryDateStr !== '—'
-                ? dateCalc?.expiryDateStr || '—'
+              dateCalc?.expiryDateStr && dateCalc.expiryDateStr !== '—'
+                ? dateCalc.expiryDateStr
                 : cleanStringOrDash(item.yearsResource) !== '—'
                 ? `Срок: ${cleanStringOrDash(item.yearsResource)} л.`
                 : '—'
@@ -391,7 +381,7 @@ const AggregateCard: React.FC<{ item: CloudProfileData['aggregates'][0] }> = ({ 
       )}
 
       {/* Полоса светофора */}
-      {hasHourResource && (
+      {hasHourLimit && (
         <TrafficLightBar
           percent={percentConsumed}
           status={hourStatus}
@@ -406,26 +396,29 @@ const AggregateCard: React.FC<{ item: CloudProfileData['aggregates'][0] }> = ({ 
 // ==========================================
 const OilCard: React.FC<{ item: CloudOilResource; fuselageSne: number }> = ({ item, fuselageSne }) => {
   const [showDates, setShowDates] = useState(false);
-  const emptyFields = item.emptyFields || [];
 
-  const isHoursEmpty = isFieldEmpty(item.byHours, 'byHours', emptyFields);
-  const isLimitEmpty = isFieldEmpty(item.coefficient, 'coefficient', emptyFields);
+  const rawPoured = Number(item.byHours || 0);
+  const hasPoured = rawPoured > 0;
+  const pouredAtSne = hasPoured ? rawPoured : 0;
 
-  const pouredAtSne = isHoursEmpty ? undefined : Number(item.byHours);
-  const limit = isLimitEmpty ? 0 : Number(item.coefficient);
+  const rawLimit = Number(item.coefficient || 0);
+  const hasHourLimit = rawLimit > 0;
+  const limit = hasHourLimit ? rawLimit : 0;
 
-  const hasHourResource = !isLimitEmpty && limit > 0;
-  const used = pouredAtSne !== undefined ? Math.max(0, fuselageSne - pouredAtSne) : undefined;
-  const remaining = hasHourResource && used !== undefined ? limit - used : undefined;
+  // Наработка масла
+  const used = Math.max(0, fuselageSne - pouredAtSne);
+
+  // Остаток по маслу
+  const remaining = hasHourLimit ? limit - used : undefined;
 
   let hourStatus: 'normal' | 'warning' | 'critical' | 'expired' = 'normal';
-  if (hasHourResource && remaining !== undefined) {
+  if (hasHourLimit && remaining !== undefined) {
     hourStatus = getMinutesStatus(remaining, limit);
   }
 
   // Расчёт дат
-  const hasYears = !isFieldEmpty(item.byYears, 'byYears', emptyFields);
-  const hasTerm = !isFieldEmpty(item.term, 'term', emptyFields);
+  const hasYears = !!(item.byYears && cleanStringOrDash(item.byYears) !== '—');
+  const hasTerm = !!(item.term && cleanStringOrDash(item.term) !== '—');
 
   const dateCalc = (hasYears && hasTerm)
     ? calculateDates(item.byYears, item.term)
@@ -434,7 +427,7 @@ const OilCard: React.FC<{ item: CloudOilResource; fuselageSne: number }> = ({ it
   const dateStatus = dateCalc ? dateCalc.status : 'normal';
 
   const currentStatus = showDates ? dateStatus : hourStatus;
-  const isAnyExpired = (hasHourResource && hourStatus === 'expired') || (dateCalc && dateStatus === 'expired');
+  const isAnyExpired = (hasHourLimit && hourStatus === 'expired') || (dateCalc && dateStatus === 'expired');
   const effectiveStatus = isAnyExpired && currentStatus === 'normal' ? 'warning' : currentStatus;
 
   const statusColor =
@@ -444,11 +437,7 @@ const OilCard: React.FC<{ item: CloudOilResource; fuselageSne: number }> = ({ it
       ? '#FFD60A'
       : '#30D158';
 
-  const percentConsumed = hasHourResource && used !== undefined && limit > 0
-    ? (used / limit) * 100
-    : remaining !== undefined && remaining < 0
-    ? 100
-    : 0;
+  const percentConsumed = hasHourLimit && limit > 0 ? (used / limit) * 100 : 0;
 
   return (
     <article className="space-y-3 rounded-2xl border border-[#3A3A3C] bg-[#2A2A2D] p-3.5 shadow-sm transition-colors">
@@ -479,17 +468,17 @@ const OilCard: React.FC<{ item: CloudOilResource; fuselageSne: number }> = ({ it
         <div className="space-y-2">
           {/* Верхний ряд: 2 поля — СНЭ (наработка масла) и Остаток */}
           <div className="grid grid-cols-2 gap-2">
-            <Metric label="СНЭ (наработка)" value={formatMinutes(used, used === undefined)} />
+            <Metric label="СНЭ (наработка)" value={formatMinutes(used)} />
             <Metric
               label="Остаток"
-              value={formatMinutes(remaining, !hasHourResource)}
+              value={remaining !== undefined ? formatMinutes(remaining) : '—'}
               color={remaining !== undefined && remaining < 0 ? '#FF453A' : statusColor}
             />
           </div>
           {/* Нижний ряд: Ресурс */}
           <div className="relative">
-            <Metric label="Ресурс" value={formatMinutes(item.coefficient, isLimitEmpty)} />
-            {pouredAtSne !== undefined && pouredAtSne > 0 && (
+            <Metric label="Ресурс" value={hasHourLimit ? formatMinutes(limit) : '—'} />
+            {hasPoured && (
               <span className="absolute bottom-1 right-2.5 text-[9px] text-[#666]">
                 залито при СНЭ {formatMinutes(pouredAtSne)}
               </span>
@@ -511,8 +500,8 @@ const OilCard: React.FC<{ item: CloudOilResource; fuselageSne: number }> = ({ it
           <Metric
             label="Дата окончания"
             value={
-              dateCalc?.expiryDateStr !== '—'
-                ? dateCalc?.expiryDateStr || '—'
+              dateCalc?.expiryDateStr && dateCalc.expiryDateStr !== '—'
+                ? dateCalc.expiryDateStr
                 : cleanStringOrDash(item.term) !== '—'
                 ? `Срок: ${cleanStringOrDash(item.term)} г.`
                 : '—'
@@ -522,7 +511,7 @@ const OilCard: React.FC<{ item: CloudOilResource; fuselageSne: number }> = ({ it
       )}
 
       {/* Полоса светофора */}
-      {hasHourResource && (
+      {hasHourLimit && (
         <TrafficLightBar
           percent={percentConsumed}
           status={hourStatus}
@@ -608,7 +597,7 @@ const HourlyMaintenanceCard: React.FC<{
           <div className="grid grid-cols-2 gap-2">
             <Metric
               label="Наработка с ТО"
-              value={formatMinutes(usedHours, !hasLast)}
+              value={formatMinutes(usedHours)}
             />
             <Metric
               label="Остаток"
@@ -645,7 +634,7 @@ const HourlyMaintenanceCard: React.FC<{
         </div>
       )}
 
-      {/* Полоса светофора (расход межрегламентного интервала в часах) */}
+      {/* Полоса светофора */}
       {hasLast && (
         <TrafficLightBar
           percent={percentHours}
@@ -773,7 +762,7 @@ const CalendarMaintenanceCard: React.FC<{
         </div>
       </div>
 
-      {/* Полоса светофора (расход календарного интервала в днях) */}
+      {/* Полоса светофора */}
       {hasLast && (
         <TrafficLightBar
           percent={percentTime}
@@ -925,7 +914,7 @@ export const ResourcesTab: React.FC<ResourcesTabProps> = ({ profile, loading, er
             </button>
           </div>
 
-          {/* Вид 1: Контроль регламентов (разделено: Часовые отдельно, Календарные отдельно) */}
+          {/* Вид 1: Контроль регламентов */}
           {journalView === 'due' && (
             <div className="space-y-4">
               {/* Блок 1: По наработке (Часовые регламенты) */}
