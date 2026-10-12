@@ -58,7 +58,10 @@ function parseCustomDate(str?: string): Date | null {
       const day = parseInt(parts[0], 10);
       const month = parseInt(parts[1], 10) - 1;
       let year = parseInt(parts[2], 10);
-      if (year < 100) year += 2000;
+      if (year < 100) {
+        // Двухзначный год: 50..99 -> 1950..1999, 00..49 -> 2000..2049
+        year += year >= 50 ? 1900 : 2000;
+      }
       if (!isNaN(day) && !isNaN(month) && !isNaN(year)) {
         return new Date(year, month, day);
       }
@@ -88,7 +91,46 @@ function formatCustomDate(date: Date): string {
   return `${day}.${month}.${year}`;
 }
 
-function calculateDates(issueDateRaw?: string, yearsResourceRaw?: string, extendedTo2Raw?: string): DateCalcResult | null {
+// Определение статуса по часам/минутам (отрицательное — ВСЕГДА expired)
+function getMinutesStatus(
+  remaining: number,
+  limit?: number
+): 'normal' | 'warning' | 'critical' | 'expired' {
+  // Строго: если остаток меньше 0 — ВСЕГДА просрочено!
+  if (remaining < 0) {
+    return 'expired';
+  }
+  // Если ровно 0 при наличии лимита — ресурс исчерпан
+  if (remaining === 0 && (limit || 0) > 0) {
+    return 'expired';
+  }
+
+  if (limit && limit > 0) {
+    const percentRemaining = (remaining / limit) * 100;
+    if (remaining <= 20 * 60 || percentRemaining <= 5) {
+      return 'critical';
+    }
+    if (remaining <= 50 * 60 || percentRemaining <= 10) {
+      return 'warning';
+    }
+    return 'normal';
+  }
+
+  // Если лимит не задан, но остаток задан
+  if (remaining <= 20 * 60) {
+    return 'critical';
+  }
+  if (remaining <= 50 * 60) {
+    return 'warning';
+  }
+  return 'normal';
+}
+
+function calculateDates(
+  issueDateRaw?: string,
+  yearsResourceRaw?: string,
+  extendedTo2Raw?: string
+): DateCalcResult | null {
   const issue = parseCustomDate(issueDateRaw);
   if (!issue) return null;
 
@@ -130,6 +172,9 @@ function calculateDates(issueDateRaw?: string, yearsResourceRaw?: string, extend
   if (days < 0) {
     remainingStr = `Просрочено (${Math.abs(days)} дн.)`;
     status = 'expired';
+  } else if (days === 0) {
+    remainingStr = 'Истекает сегодня';
+    status = 'critical';
   } else if (days < 100) {
     remainingStr = `${days} дн.`;
     status = days <= 30 ? 'critical' : 'warning';
@@ -169,7 +214,13 @@ const StatusIcon = ({ status }: { status: 'normal' | 'warning' | 'critical' | 'e
   }
 };
 
-const TrafficLightBar = ({ percent, status }: { percent: number; status: 'normal' | 'warning' | 'critical' | 'expired' }) => {
+const TrafficLightBar = ({
+  percent,
+  status,
+}: {
+  percent: number;
+  status: 'normal' | 'warning' | 'critical' | 'expired';
+}) => {
   const clampedPercent = Math.max(0, Math.min(100, percent));
   const activeColor =
     status === 'expired' || status === 'critical'
@@ -191,7 +242,7 @@ const TrafficLightBar = ({ percent, status }: { percent: number; status: 'normal
         <div
           className="relative h-full rounded-full transition-all duration-300"
           style={{
-            width: `${status === 'expired' ? 100 : clampedPercent}%`,
+            width: `${status === 'expired' || clampedPercent >= 100 ? 100 : clampedPercent}%`,
             backgroundColor: activeColor,
             boxShadow: `0 0 6px ${activeColor}66`,
           }}
@@ -199,7 +250,9 @@ const TrafficLightBar = ({ percent, status }: { percent: number; status: 'normal
       </div>
       <div className="flex justify-between px-0.5 text-[9px] text-[#666]">
         <span>0%</span>
-        <span className="text-[#888]">{clampedPercent.toFixed(0)}%</span>
+        <span className="text-[#888]">
+          {status === 'expired' ? '100%' : `${clampedPercent.toFixed(0)}%`}
+        </span>
         <span className="text-[#FF453A]">100%</span>
       </div>
     </div>
@@ -217,24 +270,20 @@ const AggregateCard: React.FC<{ item: CloudProfileData['aggregates'][0] }> = ({ 
   const limit = Number(item.extendedTo1 || 0);
   const remaining = limit - sne;
 
-  const percentConsumed = limit > 0 ? (sne / limit) * 100 : 0;
-  const percentRemaining = limit > 0 ? (remaining / limit) * 100 : 0;
-
-  let hourStatus: 'normal' | 'warning' | 'critical' | 'expired' = 'normal';
-  if (limit > 0 && remaining < 0) {
-    hourStatus = 'expired';
-  } else if (limit > 0 && (remaining <= 20 * 60 || percentRemaining <= 5)) {
-    hourStatus = 'critical';
-  } else if (limit > 0 && (remaining <= 50 * 60 || percentRemaining <= 10)) {
-    hourStatus = 'warning';
-  } else {
-    hourStatus = 'normal';
-  }
+  const percentConsumed = limit > 0 ? (sne / limit) * 100 : remaining < 0 ? 100 : 0;
+  const hourStatus = getMinutesStatus(remaining, limit);
 
   // Расчёт дат
   const dateCalc = calculateDates(item.issueDate, item.yearsResource, item.extendedTo2);
+  const dateStatus = dateCalc ? dateCalc.status : 'normal';
 
-  const currentStatus = showDates && dateCalc ? dateCalc.status : hourStatus;
+  // Текущий статус карточки
+  const currentStatus = showDates ? dateStatus : hourStatus;
+
+  // Если один из параметров просрочен — предупреждаем пользователя
+  const isAnyExpired = hourStatus === 'expired' || dateStatus === 'expired';
+  const effectiveStatus = isAnyExpired && currentStatus === 'normal' ? 'warning' : currentStatus;
+
   const statusColor =
     currentStatus === 'expired' || currentStatus === 'critical'
       ? '#FF453A'
@@ -261,7 +310,7 @@ const AggregateCard: React.FC<{ item: CloudProfileData['aggregates'][0] }> = ({ 
           </span>
         </button>
         <div className="shrink-0 flex items-center justify-center p-1 rounded-full bg-[#1C1C1E]/50">
-          <StatusIcon status={currentStatus} />
+          <StatusIcon status={effectiveStatus} />
         </div>
       </div>
 
@@ -274,7 +323,7 @@ const AggregateCard: React.FC<{ item: CloudProfileData['aggregates'][0] }> = ({ 
             <Metric
               label="Остаток"
               value={formatMinutes(remaining)}
-              color={statusColor}
+              color={remaining < 0 ? '#FF453A' : statusColor}
             />
           </div>
           {/* Нижний ряд: Ресурс */}
@@ -288,7 +337,7 @@ const AggregateCard: React.FC<{ item: CloudProfileData['aggregates'][0] }> = ({ 
             <Metric
               label="Остаток"
               value={dateCalc?.remainingStr || '—'}
-              color={statusColor}
+              color={dateCalc && dateCalc.daysRemaining < 0 ? '#FF453A' : statusColor}
             />
           </div>
           {/* Нижний ряд: Дата окончания */}
@@ -300,7 +349,7 @@ const AggregateCard: React.FC<{ item: CloudProfileData['aggregates'][0] }> = ({ 
       )}
 
       {/* Полоса светофора */}
-      {limit > 0 && (
+      {(limit > 0 || remaining < 0) && (
         <TrafficLightBar
           percent={percentConsumed}
           status={hourStatus}
@@ -322,24 +371,17 @@ const OilCard: React.FC<{ item: CloudOilResource; fuselageSne: number }> = ({ it
   const limit = Number(item.coefficient || 0);
   const remaining = limit - used;
 
-  const percentConsumed = limit > 0 ? (used / limit) * 100 : 0;
-  const percentRemaining = limit > 0 ? (remaining / limit) * 100 : 0;
-
-  let hourStatus: 'normal' | 'warning' | 'critical' | 'expired' = 'normal';
-  if (limit > 0 && remaining < 0) {
-    hourStatus = 'expired';
-  } else if (limit > 0 && (remaining <= 20 * 60 || percentRemaining <= 5)) {
-    hourStatus = 'critical';
-  } else if (limit > 0 && (remaining <= 50 * 60 || percentRemaining <= 10)) {
-    hourStatus = 'warning';
-  } else {
-    hourStatus = 'normal';
-  }
+  const percentConsumed = limit > 0 ? (used / limit) * 100 : remaining < 0 ? 100 : 0;
+  const hourStatus = getMinutesStatus(remaining, limit);
 
   // Расчёт дат (дата заливки + срок службы в годах)
   const dateCalc = calculateDates(item.byYears, item.term);
+  const dateStatus = dateCalc ? dateCalc.status : 'normal';
 
-  const currentStatus = showDates && dateCalc ? dateCalc.status : hourStatus;
+  const currentStatus = showDates ? dateStatus : hourStatus;
+  const isAnyExpired = hourStatus === 'expired' || dateStatus === 'expired';
+  const effectiveStatus = isAnyExpired && currentStatus === 'normal' ? 'warning' : currentStatus;
+
   const statusColor =
     currentStatus === 'expired' || currentStatus === 'critical'
       ? '#FF453A'
@@ -367,7 +409,7 @@ const OilCard: React.FC<{ item: CloudOilResource; fuselageSne: number }> = ({ it
           </span>
         </button>
         <div className="shrink-0 flex items-center justify-center p-1 rounded-full bg-[#1C1C1E]/50">
-          <StatusIcon status={currentStatus} />
+          <StatusIcon status={effectiveStatus} />
         </div>
       </div>
 
@@ -380,7 +422,7 @@ const OilCard: React.FC<{ item: CloudOilResource; fuselageSne: number }> = ({ it
             <Metric
               label="Остаток"
               value={formatMinutes(remaining)}
-              color={statusColor}
+              color={remaining < 0 ? '#FF453A' : statusColor}
             />
           </div>
           {/* Нижний ряд: Ресурс */}
@@ -401,7 +443,7 @@ const OilCard: React.FC<{ item: CloudOilResource; fuselageSne: number }> = ({ it
             <Metric
               label="Остаток"
               value={dateCalc?.remainingStr || '—'}
-              color={statusColor}
+              color={dateCalc && dateCalc.daysRemaining < 0 ? '#FF453A' : statusColor}
             />
           </div>
           {/* Нижний ряд: Дата окончания (Дата заливки + Срок) */}
@@ -413,7 +455,7 @@ const OilCard: React.FC<{ item: CloudOilResource; fuselageSne: number }> = ({ it
       )}
 
       {/* Полоса светофора */}
-      {limit > 0 && (
+      {(limit > 0 || remaining < 0) && (
         <TrafficLightBar
           percent={percentConsumed}
           status={hourStatus}
@@ -424,7 +466,7 @@ const OilCard: React.FC<{ item: CloudOilResource; fuselageSne: number }> = ({ it
 };
 
 // ==========================================
-// Карточка регламентной работы в Журнале (1 в 1 по аналогии)
+// Карточка регламентной работы в Журнале
 // ==========================================
 interface ScheduledDef {
   kind: string;
@@ -457,21 +499,11 @@ const ScheduledWorkCard: React.FC<{
   const lastCounter = Number(lastWork?.counterMinutes || 0);
   const usedHours = Math.max(0, fuselageSne - lastCounter);
   const remainingHours = isHourly ? limitMinutes - usedHours : 0;
-  const percentHours = limitMinutes > 0 ? (usedHours / limitMinutes) * 100 : 0;
-  const percentRemainingHours = limitMinutes > 0 ? (remainingHours / limitMinutes) * 100 : 0;
+  const percentHours = limitMinutes > 0 ? (usedHours / limitMinutes) * 100 : remainingHours < 0 ? 100 : 0;
 
-  let hourStatus: 'normal' | 'warning' | 'critical' | 'expired' = 'normal';
-  if (isHourly) {
-    if (remainingHours < 0) {
-      hourStatus = 'expired';
-    } else if (remainingHours <= 10 * 60 || percentRemainingHours <= 5) {
-      hourStatus = 'critical';
-    } else if (remainingHours <= 25 * 60 || percentRemainingHours <= 10) {
-      hourStatus = 'warning';
-    } else {
-      hourStatus = 'normal';
-    }
-  }
+  const hourStatus = isHourly
+    ? getMinutesStatus(remainingHours, limitMinutes)
+    : 'normal';
 
   // Расчет дат
   let dateCalc: DateCalcResult | null = null;
@@ -492,11 +524,10 @@ const ScheduledWorkCard: React.FC<{
           expiryDateStr: formatCustomDate(expiry),
           remainingStr: diffDays < 0 ? `Просрочено (${Math.abs(diffDays)} дн.)` : `${diffDays} дн.`,
           daysRemaining: diffDays,
-          status: diffDays < 0 ? 'expired' : diffDays <= 5 ? 'critical' : diffDays <= 15 ? 'warning' : 'normal',
+          status: diffDays < 0 ? 'expired' : diffDays === 0 ? 'critical' : diffDays <= 5 ? 'critical' : diffDays <= 15 ? 'warning' : 'normal',
         };
       }
     } else if (isHourly) {
-      // Для часовых регламентов в режиме дат показываем дату последнего выполнения
       const baseDate = parseCustomDate(lastWork.date);
       if (baseDate) {
         dateCalc = {
@@ -510,12 +541,11 @@ const ScheduledWorkCard: React.FC<{
     }
   }
 
-  const currentStatus =
-    showDates && dateCalc
-      ? dateCalc.status
-      : isHourly
-      ? hourStatus
-      : dateCalc?.status || 'normal';
+  // Если работа ни разу не выполнялась, статус не должен быть зеленым
+  const fallbackStatus = lastWork ? 'normal' : 'warning';
+  const dateStatus = dateCalc ? dateCalc.status : fallbackStatus;
+
+  const currentStatus = showDates ? dateStatus : isHourly ? hourStatus : dateStatus;
 
   const statusColor =
     currentStatus === 'expired' || currentStatus === 'critical'
@@ -559,8 +589,8 @@ const ScheduledWorkCard: React.FC<{
             />
             <Metric
               label="Остаток"
-              value={isHourly ? formatMinutes(remainingHours) : dateCalc?.remainingStr || '—'}
-              color={statusColor}
+              value={isHourly ? formatMinutes(remainingHours) : dateCalc?.remainingStr || (!lastWork ? 'Не выполнялось' : '—')}
+              color={isHourly && remainingHours < 0 ? '#FF453A' : statusColor}
             />
           </div>
           {/* Нижний ряд: Ресурс / Интервал */}
@@ -591,8 +621,8 @@ const ScheduledWorkCard: React.FC<{
             <Metric label="Дата последнего ТО" value={lastWork?.date || 'Не выполнялось'} />
             <Metric
               label="Остаток"
-              value={dateCalc?.remainingStr || (isHourly ? formatMinutes(remainingHours) : '—')}
-              color={statusColor}
+              value={dateCalc?.remainingStr || (isHourly ? formatMinutes(remainingHours) : 'Не выполнялось')}
+              color={dateCalc && dateCalc.daysRemaining < 0 ? '#FF453A' : statusColor}
             />
           </div>
           {/* Нижний ряд: Дата окончания / следующий срок */}
@@ -609,7 +639,7 @@ const ScheduledWorkCard: React.FC<{
       )}
 
       {/* Полоса светофора */}
-      {isHourly && limitMinutes > 0 && (
+      {isHourly && (limitMinutes > 0 || remainingHours < 0) && (
         <TrafficLightBar
           percent={percentHours}
           status={hourStatus}
