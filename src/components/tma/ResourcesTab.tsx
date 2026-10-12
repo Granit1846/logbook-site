@@ -22,11 +22,35 @@ interface ResourcesTabProps {
   onRefresh: () => void;
 }
 
-const formatMinutes = (value?: number) => {
-  if (value === undefined || !Number.isFinite(value)) return '—';
+const cleanStringOrDash = (val?: string): string => {
+  if (!val) return '—';
+  const trimmed = val.trim();
+  if (trimmed === '' || trimmed === '0' || trimmed === '0.0' || trimmed === '—' || trimmed === '-') {
+    return '—';
+  }
+  return trimmed;
+};
+
+const formatMinutes = (value?: number | null, isEmpty?: boolean): string => {
+  if (isEmpty || value === undefined || value === null || !Number.isFinite(value)) {
+    return '—';
+  }
   const sign = value < 0 ? '−' : '';
   const absolute = Math.abs(Math.round(value));
   return `${sign}${Math.floor(absolute / 60)}:${String(absolute % 60).padStart(2, '0')}`;
+};
+
+const isFieldEmpty = (val: unknown, fieldName: string, emptyFields?: string[]): boolean => {
+  if (emptyFields && emptyFields.includes(fieldName)) return true;
+  if (val === undefined || val === null) return true;
+  if (typeof val === 'string') {
+    const s = val.trim();
+    return s === '' || s === '0' || s === '—' || s === '-';
+  }
+  if (typeof val === 'number') {
+    return isNaN(val) || val <= 0;
+  }
+  return false;
 };
 
 const workKind: Record<string, string> = {
@@ -50,7 +74,7 @@ interface DateCalcResult {
 function parseCustomDate(str?: string): Date | null {
   if (!str || typeof str !== 'string') return null;
   const trimmed = str.trim();
-  if (!trimmed) return null;
+  if (!trimmed || trimmed === '0' || trimmed === '—' || trimmed === '-') return null;
 
   if (trimmed.includes('.')) {
     const parts = trimmed.split('.');
@@ -59,7 +83,6 @@ function parseCustomDate(str?: string): Date | null {
       const month = parseInt(parts[1], 10) - 1;
       let year = parseInt(parts[2], 10);
       if (year < 100) {
-        // Двухзначный год: 50..99 -> 1950..1999, 00..49 -> 2000..2049
         year += year >= 50 ? 1900 : 2000;
       }
       if (!isNaN(day) && !isNaN(month) && !isNaN(year)) {
@@ -96,11 +119,9 @@ function getMinutesStatus(
   remaining: number,
   limit?: number
 ): 'normal' | 'warning' | 'critical' | 'expired' {
-  // Строго: если остаток меньше 0 — ВСЕГДА просрочено!
   if (remaining < 0) {
     return 'expired';
   }
-  // Если ровно 0 при наличии лимита — ресурс исчерпан
   if (remaining === 0 && (limit || 0) > 0) {
     return 'expired';
   }
@@ -116,7 +137,6 @@ function getMinutesStatus(
     return 'normal';
   }
 
-  // Если лимит не задан, но остаток задан
   if (remaining <= 20 * 60) {
     return 'critical';
   }
@@ -134,7 +154,8 @@ function calculateDates(
   const issue = parseCustomDate(issueDateRaw);
   if (!issue) return null;
 
-  const years = parseFloat(String(yearsResourceRaw || '').replace(',', '.'));
+  const yearsClean = cleanStringOrDash(yearsResourceRaw);
+  const years = yearsClean !== '—' ? parseFloat(yearsClean.replace(',', '.')) : NaN;
   let expiry: Date | null = null;
 
   const extendedDate = parseCustomDate(extendedTo2Raw);
@@ -264,24 +285,40 @@ const TrafficLightBar = ({
 // ==========================================
 const AggregateCard: React.FC<{ item: CloudProfileData['aggregates'][0] }> = ({ item }) => {
   const [showDates, setShowDates] = useState(false);
+  const emptyFields = item.emptyFields || [];
+
+  // Проверка пустоты полей (не показываем пустые значения как 0 / 0:00)
+  const isSneEmpty = isFieldEmpty(item.sne, 'sne', emptyFields);
+  const isLimitEmpty = isFieldEmpty(item.extendedTo1, 'extendedTo1', emptyFields);
+
+  const sne = isSneEmpty ? 0 : Number(item.sne);
+  const limit = isLimitEmpty ? 0 : Number(item.extendedTo1);
 
   // Расчёт ресурса (часы:минуты)
-  const sne = Number(item.sne || 0);
-  const limit = Number(item.extendedTo1 || 0);
-  const remaining = limit - sne;
+  const hasHourResource = !isLimitEmpty && limit > 0;
+  const remaining = hasHourResource ? limit - sne : undefined;
 
-  const percentConsumed = limit > 0 ? (sne / limit) * 100 : remaining < 0 ? 100 : 0;
-  const hourStatus = getMinutesStatus(remaining, limit);
+  let hourStatus: 'normal' | 'warning' | 'critical' | 'expired' = 'normal';
+  if (hasHourResource && remaining !== undefined) {
+    hourStatus = getMinutesStatus(remaining, limit);
+  }
 
   // Расчёт дат
-  const dateCalc = calculateDates(item.issueDate, item.yearsResource, item.extendedTo2);
+  const hasIssueDate = !isFieldEmpty(item.issueDate, 'issueDate', emptyFields);
+  const hasYears = !isFieldEmpty(item.yearsResource, 'yearsResource', emptyFields);
+  const hasExtended2 = !isFieldEmpty(item.extendedTo2, 'extendedTo2', emptyFields);
+
+  const dateCalc = (hasIssueDate && (hasYears || hasExtended2))
+    ? calculateDates(item.issueDate, item.yearsResource, item.extendedTo2)
+    : null;
+
   const dateStatus = dateCalc ? dateCalc.status : 'normal';
 
   // Текущий статус карточки
   const currentStatus = showDates ? dateStatus : hourStatus;
 
   // Если один из параметров просрочен — предупреждаем пользователя
-  const isAnyExpired = hourStatus === 'expired' || dateStatus === 'expired';
+  const isAnyExpired = (hasHourResource && hourStatus === 'expired') || (dateCalc && dateStatus === 'expired');
   const effectiveStatus = isAnyExpired && currentStatus === 'normal' ? 'warning' : currentStatus;
 
   const statusColor =
@@ -290,6 +327,8 @@ const AggregateCard: React.FC<{ item: CloudProfileData['aggregates'][0] }> = ({ 
       : currentStatus === 'warning'
       ? '#FFD60A'
       : '#30D158';
+
+  const percentConsumed = hasHourResource && limit > 0 ? (sne / limit) * 100 : (remaining !== undefined && remaining < 0) ? 100 : 0;
 
   return (
     <article className="space-y-3 rounded-2xl border border-[#3A3A3C] bg-[#2A2A2D] p-3.5 shadow-sm transition-colors">
@@ -302,7 +341,7 @@ const AggregateCard: React.FC<{ item: CloudProfileData['aggregates'][0] }> = ({ 
           title="Нажмите, чтобы переключить между часами и датами"
         >
           <span className="text-[14px] font-bold text-[#F0F0F0] group-hover:text-[#229ED9] transition-colors">
-            {item.name || 'Без названия'}
+            {cleanStringOrDash(item.name) !== '—' ? item.name : 'Агрегат без названия'}
           </span>
           <span className="flex items-center gap-0.5 rounded-md bg-[#1C1C1E] px-1.5 py-0.5 text-[10px] font-medium text-[#888] group-hover:text-[#229ED9] transition-colors">
             {showDates ? <Calendar className="h-3 w-3" /> : <Clock3 className="h-3 w-3" />}
@@ -319,21 +358,21 @@ const AggregateCard: React.FC<{ item: CloudProfileData['aggregates'][0] }> = ({ 
         <div className="space-y-2">
           {/* Верхний ряд: 2 поля — СНЭ и Остаток */}
           <div className="grid grid-cols-2 gap-2">
-            <Metric label="СНЭ" value={formatMinutes(sne)} />
+            <Metric label="СНЭ" value={formatMinutes(item.sne, isSneEmpty)} />
             <Metric
               label="Остаток"
-              value={formatMinutes(remaining)}
-              color={remaining < 0 ? '#FF453A' : statusColor}
+              value={formatMinutes(remaining, !hasHourResource)}
+              color={remaining !== undefined && remaining < 0 ? '#FF453A' : statusColor}
             />
           </div>
           {/* Нижний ряд: Ресурс */}
-          <Metric label="Ресурс" value={formatMinutes(limit)} />
+          <Metric label="Ресурс" value={formatMinutes(item.extendedTo1, isLimitEmpty)} />
         </div>
       ) : (
         <div className="space-y-2">
           {/* Верхний ряд: 2 поля — Дата выпуска и Остаток */}
           <div className="grid grid-cols-2 gap-2">
-            <Metric label="Дата выпуска" value={dateCalc?.issueDateStr || item.issueDate || '—'} />
+            <Metric label="Дата выпуска" value={dateCalc?.issueDateStr || cleanStringOrDash(item.issueDate)} />
             <Metric
               label="Остаток"
               value={dateCalc?.remainingStr || '—'}
@@ -343,13 +382,19 @@ const AggregateCard: React.FC<{ item: CloudProfileData['aggregates'][0] }> = ({ 
           {/* Нижний ряд: Дата окончания */}
           <Metric
             label="Дата окончания"
-            value={dateCalc?.expiryDateStr || (item.yearsResource ? `Срок: ${item.yearsResource} л.` : '—')}
+            value={
+              dateCalc?.expiryDateStr !== '—'
+                ? dateCalc?.expiryDateStr || '—'
+                : cleanStringOrDash(item.yearsResource) !== '—'
+                ? `Срок: ${cleanStringOrDash(item.yearsResource)} л.`
+                : '—'
+            }
           />
         </div>
       )}
 
-      {/* Полоса светофора */}
-      {(limit > 0 || remaining < 0) && (
+      {/* Полоса светофора (отображается только если задан ресурс или есть переработка) */}
+      {hasHourResource && (
         <TrafficLightBar
           percent={percentConsumed}
           status={hourStatus}
@@ -364,22 +409,35 @@ const AggregateCard: React.FC<{ item: CloudProfileData['aggregates'][0] }> = ({ 
 // ==========================================
 const OilCard: React.FC<{ item: CloudOilResource; fuselageSne: number }> = ({ item, fuselageSne }) => {
   const [showDates, setShowDates] = useState(false);
+  const emptyFields = item.emptyFields || [];
 
-  // Расчёт ресурса (часы:минуты)
-  const pouredAtSne = Number(item.byHours || 0);
-  const used = Math.max(0, fuselageSne - pouredAtSne);
-  const limit = Number(item.coefficient || 0);
-  const remaining = limit - used;
+  const isHoursEmpty = isFieldEmpty(item.byHours, 'byHours', emptyFields);
+  const isLimitEmpty = isFieldEmpty(item.coefficient, 'coefficient', emptyFields);
 
-  const percentConsumed = limit > 0 ? (used / limit) * 100 : remaining < 0 ? 100 : 0;
-  const hourStatus = getMinutesStatus(remaining, limit);
+  const pouredAtSne = isHoursEmpty ? undefined : Number(item.byHours);
+  const limit = isLimitEmpty ? 0 : Number(item.coefficient);
 
-  // Расчёт дат (дата заливки + срок службы в годах)
-  const dateCalc = calculateDates(item.byYears, item.term);
+  const hasHourResource = !isLimitEmpty && limit > 0;
+  const used = pouredAtSne !== undefined ? Math.max(0, fuselageSne - pouredAtSne) : undefined;
+  const remaining = hasHourResource && used !== undefined ? limit - used : undefined;
+
+  let hourStatus: 'normal' | 'warning' | 'critical' | 'expired' = 'normal';
+  if (hasHourResource && remaining !== undefined) {
+    hourStatus = getMinutesStatus(remaining, limit);
+  }
+
+  // Расчёт дат
+  const hasYears = !isFieldEmpty(item.byYears, 'byYears', emptyFields);
+  const hasTerm = !isFieldEmpty(item.term, 'term', emptyFields);
+
+  const dateCalc = (hasYears && hasTerm)
+    ? calculateDates(item.byYears, item.term)
+    : null;
+
   const dateStatus = dateCalc ? dateCalc.status : 'normal';
 
   const currentStatus = showDates ? dateStatus : hourStatus;
-  const isAnyExpired = hourStatus === 'expired' || dateStatus === 'expired';
+  const isAnyExpired = (hasHourResource && hourStatus === 'expired') || (dateCalc && dateStatus === 'expired');
   const effectiveStatus = isAnyExpired && currentStatus === 'normal' ? 'warning' : currentStatus;
 
   const statusColor =
@@ -388,6 +446,12 @@ const OilCard: React.FC<{ item: CloudOilResource; fuselageSne: number }> = ({ it
       : currentStatus === 'warning'
       ? '#FFD60A'
       : '#30D158';
+
+  const percentConsumed = hasHourResource && used !== undefined && limit > 0
+    ? (used / limit) * 100
+    : remaining !== undefined && remaining < 0
+    ? 100
+    : 0;
 
   return (
     <article className="space-y-3 rounded-2xl border border-[#3A3A3C] bg-[#2A2A2D] p-3.5 shadow-sm transition-colors">
@@ -401,7 +465,7 @@ const OilCard: React.FC<{ item: CloudOilResource; fuselageSne: number }> = ({ it
         >
           <Droplets className="h-4 w-4 shrink-0 text-[#229ED9] group-hover:scale-110 transition-transform" />
           <span className="text-[14px] font-bold text-[#F0F0F0] group-hover:text-[#229ED9] transition-colors">
-            {item.name || 'Без названия'}
+            {cleanStringOrDash(item.name) !== '—' ? item.name : 'Масло без названия'}
           </span>
           <span className="flex items-center gap-0.5 rounded-md bg-[#1C1C1E] px-1.5 py-0.5 text-[10px] font-medium text-[#888] group-hover:text-[#229ED9] transition-colors">
             {showDates ? <Calendar className="h-3 w-3" /> : <Clock3 className="h-3 w-3" />}
@@ -418,17 +482,17 @@ const OilCard: React.FC<{ item: CloudOilResource; fuselageSne: number }> = ({ it
         <div className="space-y-2">
           {/* Верхний ряд: 2 поля — СНЭ (наработка масла) и Остаток */}
           <div className="grid grid-cols-2 gap-2">
-            <Metric label="СНЭ (наработка)" value={formatMinutes(used)} />
+            <Metric label="СНЭ (наработка)" value={formatMinutes(used, used === undefined)} />
             <Metric
               label="Остаток"
-              value={formatMinutes(remaining)}
-              color={remaining < 0 ? '#FF453A' : statusColor}
+              value={formatMinutes(remaining, !hasHourResource)}
+              color={remaining !== undefined && remaining < 0 ? '#FF453A' : statusColor}
             />
           </div>
           {/* Нижний ряд: Ресурс */}
           <div className="relative">
-            <Metric label="Ресурс" value={formatMinutes(limit)} />
-            {pouredAtSne > 0 && (
+            <Metric label="Ресурс" value={formatMinutes(item.coefficient, isLimitEmpty)} />
+            {pouredAtSne !== undefined && pouredAtSne > 0 && (
               <span className="absolute bottom-1 right-2.5 text-[9px] text-[#666]">
                 залито при СНЭ {formatMinutes(pouredAtSne)}
               </span>
@@ -439,7 +503,7 @@ const OilCard: React.FC<{ item: CloudOilResource; fuselageSne: number }> = ({ it
         <div className="space-y-2">
           {/* Верхний ряд: 2 поля — Дата заливки и Остаток */}
           <div className="grid grid-cols-2 gap-2">
-            <Metric label="Дата заливки" value={dateCalc?.issueDateStr || item.byYears || '—'} />
+            <Metric label="Дата заливки" value={dateCalc?.issueDateStr || cleanStringOrDash(item.byYears)} />
             <Metric
               label="Остаток"
               value={dateCalc?.remainingStr || '—'}
@@ -449,13 +513,19 @@ const OilCard: React.FC<{ item: CloudOilResource; fuselageSne: number }> = ({ it
           {/* Нижний ряд: Дата окончания (Дата заливки + Срок) */}
           <Metric
             label="Дата окончания"
-            value={dateCalc?.expiryDateStr || (item.term ? `Срок: ${item.term} г.` : '—')}
+            value={
+              dateCalc?.expiryDateStr !== '—'
+                ? dateCalc?.expiryDateStr || '—'
+                : cleanStringOrDash(item.term) !== '—'
+                ? `Срок: ${cleanStringOrDash(item.term)} г.`
+                : '—'
+            }
           />
         </div>
       )}
 
       {/* Полоса светофора */}
-      {(limit > 0 || remaining < 0) && (
+      {hasHourResource && (
         <TrafficLightBar
           percent={percentConsumed}
           status={hourStatus}
@@ -496,18 +566,23 @@ const ScheduledWorkCard: React.FC<{
   const limitMinutes = (def.nominalHours || 0) * 60;
 
   // Часовой расчет
+  const hasLast = !!lastWork;
   const lastCounter = Number(lastWork?.counterMinutes || 0);
-  const usedHours = Math.max(0, fuselageSne - lastCounter);
-  const remainingHours = isHourly ? limitMinutes - usedHours : 0;
-  const percentHours = limitMinutes > 0 ? (usedHours / limitMinutes) * 100 : remainingHours < 0 ? 100 : 0;
+  const usedHours = hasLast ? Math.max(0, fuselageSne - lastCounter) : undefined;
+  const remainingHours = isHourly && usedHours !== undefined ? limitMinutes - usedHours : undefined;
+  const percentHours = isHourly && limitMinutes > 0 && usedHours !== undefined
+    ? (usedHours / limitMinutes) * 100
+    : remainingHours !== undefined && remainingHours < 0
+    ? 100
+    : 0;
 
-  const hourStatus = isHourly
+  const hourStatus = isHourly && remainingHours !== undefined
     ? getMinutesStatus(remainingHours, limitMinutes)
     : 'normal';
 
   // Расчет дат
   let dateCalc: DateCalcResult | null = null;
-  if (lastWork?.date) {
+  if (lastWork?.date && cleanStringOrDash(lastWork.date) !== '—') {
     if (def.nominalMonths) {
       dateCalc = calculateDates(lastWork.date, String(def.nominalMonths / 12));
     } else if (def.nominalDays) {
@@ -541,11 +616,10 @@ const ScheduledWorkCard: React.FC<{
     }
   }
 
-  // Если работа ни разу не выполнялась, статус не должен быть зеленым
-  const fallbackStatus = lastWork ? 'normal' : 'warning';
+  const fallbackStatus = hasLast ? 'normal' : 'warning';
   const dateStatus = dateCalc ? dateCalc.status : fallbackStatus;
 
-  const currentStatus = showDates ? dateStatus : isHourly ? hourStatus : dateStatus;
+  const currentStatus = showDates ? dateStatus : isHourly ? (hasLast ? hourStatus : 'warning') : dateStatus;
 
   const statusColor =
     currentStatus === 'expired' || currentStatus === 'critical'
@@ -585,12 +659,12 @@ const ScheduledWorkCard: React.FC<{
           <div className="grid grid-cols-2 gap-2">
             <Metric
               label={isHourly ? 'СНЭ (наработка)' : 'СНЭ планера'}
-              value={formatMinutes(isHourly ? usedHours : fuselageSne)}
+              value={isHourly ? formatMinutes(usedHours, !hasLast) : formatMinutes(fuselageSne)}
             />
             <Metric
               label="Остаток"
-              value={isHourly ? formatMinutes(remainingHours) : dateCalc?.remainingStr || (!lastWork ? 'Не выполнялось' : '—')}
-              color={isHourly && remainingHours < 0 ? '#FF453A' : statusColor}
+              value={isHourly ? formatMinutes(remainingHours, !hasLast) : dateCalc?.remainingStr || (hasLast ? '—' : 'Не выполнялось')}
+              color={isHourly && remainingHours !== undefined && remainingHours < 0 ? '#FF453A' : statusColor}
             />
           </div>
           {/* Нижний ряд: Ресурс / Интервал */}
@@ -607,7 +681,7 @@ const ScheduledWorkCard: React.FC<{
                   : '—'
               }
             />
-            {lastWork && (
+            {hasLast && (
               <span className="absolute bottom-1 right-2.5 text-[9px] text-[#666]">
                 выполнено при СНЭ {formatMinutes(lastCounter)}
               </span>
@@ -618,10 +692,10 @@ const ScheduledWorkCard: React.FC<{
         <div className="space-y-2">
           {/* Верхний ряд: 2 поля — Дата выполнения и Остаток */}
           <div className="grid grid-cols-2 gap-2">
-            <Metric label="Дата последнего ТО" value={lastWork?.date || 'Не выполнялось'} />
+            <Metric label="Дата последнего ТО" value={cleanStringOrDash(lastWork?.date)} />
             <Metric
               label="Остаток"
-              value={dateCalc?.remainingStr || (isHourly ? formatMinutes(remainingHours) : 'Не выполнялось')}
+              value={dateCalc?.remainingStr || (isHourly && hasLast ? formatMinutes(remainingHours) : 'Не выполнялось')}
               color={dateCalc && dateCalc.daysRemaining < 0 ? '#FF453A' : statusColor}
             />
           </div>
@@ -629,17 +703,18 @@ const ScheduledWorkCard: React.FC<{
           <Metric
             label="Следующий срок ТО"
             value={
-              dateCalc?.expiryDateStr ||
-              (isHourly && limitMinutes > 0
+              dateCalc?.expiryDateStr !== '—'
+                ? dateCalc?.expiryDateStr || '—'
+                : isHourly && hasLast && limitMinutes > 0
                 ? `При СНЭ ${formatMinutes(lastCounter + limitMinutes)}`
-                : '—')
+                : 'Не выполнялось'
             }
           />
         </div>
       )}
 
       {/* Полоса светофора */}
-      {isHourly && (limitMinutes > 0 || remainingHours < 0) && (
+      {isHourly && hasLast && limitMinutes > 0 && (
         <TrafficLightBar
           percent={percentHours}
           status={hourStatus}
@@ -697,7 +772,7 @@ export const ResourcesTab: React.FC<ResourcesTabProps> = ({ profile, loading, er
       <div className="flex items-center justify-between px-1">
         <div>
           <h3 className="text-[12px] font-bold uppercase tracking-wider text-[#999]">
-            Ресурсы борта №{profile.boardNumber}
+            Ресурсы борта №{cleanStringOrDash(profile.boardNumber)}
           </h3>
           <p className="mt-0.5 text-[10px] text-[#666]">
             СНЭ планера: <b className="text-[#AAA] font-mono">{formatMinutes(profile.fuselageSne)}</b> · данные Supabase
@@ -821,10 +896,10 @@ export const ResourcesTab: React.FC<ResourcesTabProps> = ({ profile, loading, er
                         <CheckCircle2 className="h-3.5 w-3.5 text-[#30D158]" />
                         {workKind[work.kind || ''] || work.kind || 'Техническая работа'}
                       </span>
-                      <span className="text-[10px] text-[#777] font-mono">{work.date || '—'}</span>
+                      <span className="text-[10px] text-[#777] font-mono">{cleanStringOrDash(work.date)}</span>
                     </div>
 
-                    {work.description && (
+                    {work.description && cleanStringOrDash(work.description) !== '—' && (
                       <p className="text-[12px] leading-relaxed text-[#E5E5E5] bg-[#1C1C1E]/50 rounded-xl p-2.5 border border-[#3A3A3C]/40">
                         {work.description}
                       </p>
