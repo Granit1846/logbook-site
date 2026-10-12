@@ -1,0 +1,2 @@
+[functions.logbook-files-api]
+verify_jwt = false
