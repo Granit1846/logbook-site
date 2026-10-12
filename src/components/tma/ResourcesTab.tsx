@@ -287,7 +287,7 @@ const AggregateCard: React.FC<{ item: CloudProfileData['aggregates'][0] }> = ({ 
   const [showDates, setShowDates] = useState(false);
   const emptyFields = item.emptyFields || [];
 
-  // Проверка пустоты полей (не показываем пустые значения как 0 / 0:00)
+  // Проверка пустоты полей
   const isSneEmpty = isFieldEmpty(item.sne, 'sne', emptyFields);
   const isLimitEmpty = isFieldEmpty(item.extendedTo1, 'extendedTo1', emptyFields);
 
@@ -314,10 +314,7 @@ const AggregateCard: React.FC<{ item: CloudProfileData['aggregates'][0] }> = ({ 
 
   const dateStatus = dateCalc ? dateCalc.status : 'normal';
 
-  // Текущий статус карточки
   const currentStatus = showDates ? dateStatus : hourStatus;
-
-  // Если один из параметров просрочен — предупреждаем пользователя
   const isAnyExpired = (hasHourResource && hourStatus === 'expired') || (dateCalc && dateStatus === 'expired');
   const effectiveStatus = isAnyExpired && currentStatus === 'normal' ? 'warning' : currentStatus;
 
@@ -393,7 +390,7 @@ const AggregateCard: React.FC<{ item: CloudProfileData['aggregates'][0] }> = ({ 
         </div>
       )}
 
-      {/* Полоса светофора (отображается только если задан ресурс или есть переработка) */}
+      {/* Полоса светофора */}
       {hasHourResource && (
         <TrafficLightBar
           percent={percentConsumed}
@@ -536,193 +533,268 @@ const OilCard: React.FC<{ item: CloudOilResource; fuselageSne: number }> = ({ it
 };
 
 // ==========================================
-// Карточка регламентной работы в Журнале
+// 1. ЧАСОВЫЕ РЕГЛАМЕНТЫ (50, 100, 300 часов)
+// Измеряются строго в часах (чч:мм). По клику — даты выполнения.
 // ==========================================
-interface ScheduledDef {
+interface HourlyDef {
   kind: string;
   name: string;
-  nominalHours?: number;
-  nominalDays?: number;
-  nominalMonths?: number;
+  intervalHours: number;
 }
 
-const SCHEDULED_STANDARDS: ScheduledDef[] = [
-  { kind: 'HOURS_50', name: '50-часовой регламент', nominalHours: 50 },
-  { kind: 'HOURS_100', name: '100-часовой регламент', nominalHours: 100 },
-  { kind: 'HOURS_300', name: '300-часовой регламент', nominalHours: 300 },
-  { kind: 'PERIODIC', name: 'Периодический регламент', nominalDays: 20 },
-  { kind: 'REG_12', name: 'Регламент 12 месяцев', nominalMonths: 12 },
-  { kind: 'REG_24', name: 'Регламент 24 месяца', nominalMonths: 24 },
-];
-
-const ScheduledWorkCard: React.FC<{
-  def: ScheduledDef;
+const HourlyMaintenanceCard: React.FC<{
+  def: HourlyDef;
   lastWork?: CloudMaintenanceWork;
   fuselageSne: number;
 }> = ({ def, lastWork, fuselageSne }) => {
   const [showDates, setShowDates] = useState(false);
+  const limitMinutes = def.intervalHours * 60;
 
-  const isHourly = !!def.nominalHours;
-  const limitMinutes = (def.nominalHours || 0) * 60;
-
-  // Часовой расчет
   const hasLast = !!lastWork;
   const lastCounter = Number(lastWork?.counterMinutes || 0);
+
+  // Наработка с момента выполнения ТО
   const usedHours = hasLast ? Math.max(0, fuselageSne - lastCounter) : undefined;
-  const remainingHours = isHourly && usedHours !== undefined ? limitMinutes - usedHours : undefined;
-  const percentHours = isHourly && limitMinutes > 0 && usedHours !== undefined
+  const remainingHours = usedHours !== undefined ? limitMinutes - usedHours : undefined;
+
+  const percentHours = limitMinutes > 0 && usedHours !== undefined
     ? (usedHours / limitMinutes) * 100
     : remainingHours !== undefined && remainingHours < 0
     ? 100
     : 0;
 
-  const hourStatus = isHourly && remainingHours !== undefined
+  const status = remainingHours !== undefined
     ? getMinutesStatus(remainingHours, limitMinutes)
-    : 'normal';
-
-  // Расчет дат
-  let dateCalc: DateCalcResult | null = null;
-  if (lastWork?.date && cleanStringOrDash(lastWork.date) !== '—') {
-    if (def.nominalMonths) {
-      dateCalc = calculateDates(lastWork.date, String(def.nominalMonths / 12));
-    } else if (def.nominalDays) {
-      const baseDate = parseCustomDate(lastWork.date);
-      if (baseDate) {
-        const expiry = new Date(baseDate);
-        expiry.setDate(expiry.getDate() + def.nominalDays);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        expiry.setHours(0, 0, 0, 0);
-        const diffDays = Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-        dateCalc = {
-          issueDateStr: formatCustomDate(baseDate),
-          expiryDateStr: formatCustomDate(expiry),
-          remainingStr: diffDays < 0 ? `Просрочено (${Math.abs(diffDays)} дн.)` : `${diffDays} дн.`,
-          daysRemaining: diffDays,
-          status: diffDays < 0 ? 'expired' : diffDays === 0 ? 'critical' : diffDays <= 5 ? 'critical' : diffDays <= 15 ? 'warning' : 'normal',
-        };
-      }
-    } else if (isHourly) {
-      const baseDate = parseCustomDate(lastWork.date);
-      if (baseDate) {
-        dateCalc = {
-          issueDateStr: formatCustomDate(baseDate),
-          expiryDateStr: 'По наработке СНЭ',
-          remainingStr: formatMinutes(remainingHours),
-          daysRemaining: 99999,
-          status: hourStatus,
-        };
-      }
-    }
-  }
-
-  const fallbackStatus = hasLast ? 'normal' : 'warning';
-  const dateStatus = dateCalc ? dateCalc.status : fallbackStatus;
-
-  const currentStatus = showDates ? dateStatus : isHourly ? (hasLast ? hourStatus : 'warning') : dateStatus;
+    : hasLast
+    ? 'normal'
+    : 'warning';
 
   const statusColor =
-    currentStatus === 'expired' || currentStatus === 'critical'
+    status === 'expired' || status === 'critical'
       ? '#FF453A'
-      : currentStatus === 'warning'
+      : status === 'warning'
       ? '#FFD60A'
       : '#30D158';
 
+  const lastDate = cleanStringOrDash(lastWork?.date);
+
   return (
     <article className="space-y-3 rounded-2xl border border-[#3A3A3C] bg-[#2A2A2D] p-3.5 shadow-sm transition-colors">
-      {/* Шапка: Кликабельное имя регламента + статусная иконка */}
+      {/* Шапка */}
       <div className="flex items-center justify-between gap-2">
         <button
           type="button"
           onClick={() => setShowDates((prev) => !prev)}
           className="group flex flex-1 items-center gap-1.5 text-left transition-colors"
-          title="Нажмите, чтобы переключить между часами и датами"
+          title="Нажмите, чтобы переключить между часами и датой выполнения"
         >
-          <NotebookText className="h-4 w-4 shrink-0 text-[#229ED9] group-hover:scale-110 transition-transform" />
+          <Clock3 className="h-4 w-4 shrink-0 text-[#229ED9] group-hover:scale-110 transition-transform" />
           <span className="text-[14px] font-bold text-[#F0F0F0] group-hover:text-[#229ED9] transition-colors">
             {def.name}
           </span>
           <span className="flex items-center gap-0.5 rounded-md bg-[#1C1C1E] px-1.5 py-0.5 text-[10px] font-medium text-[#888] group-hover:text-[#229ED9] transition-colors">
             {showDates ? <Calendar className="h-3 w-3" /> : <Clock3 className="h-3 w-3" />}
-            <span>{showDates ? 'Даты' : 'Часы'}</span>
+            <span>{showDates ? 'Дата' : 'Часы'}</span>
           </span>
         </button>
         <div className="shrink-0 flex items-center justify-center p-1 rounded-full bg-[#1C1C1E]/50">
-          <StatusIcon status={currentStatus} />
+          <StatusIcon status={status} />
         </div>
       </div>
 
-      {/* Поля карточки: 2 поля сверху (СНЭ и Остаток), снизу 1 поле (Ресурс / Дата окончания) */}
+      {/* Поля в режиме ЧАСОВ (по умолчанию) */}
       {!showDates ? (
         <div className="space-y-2">
-          {/* Верхний ряд: 2 поля — Наработка с ТО и Остаток */}
           <div className="grid grid-cols-2 gap-2">
             <Metric
-              label={isHourly ? 'СНЭ (наработка)' : 'СНЭ планера'}
-              value={isHourly ? formatMinutes(usedHours, !hasLast) : formatMinutes(fuselageSne)}
+              label="Наработка с ТО"
+              value={formatMinutes(usedHours, !hasLast)}
             />
             <Metric
               label="Остаток"
-              value={isHourly ? formatMinutes(remainingHours, !hasLast) : dateCalc?.remainingStr || (hasLast ? '—' : 'Не выполнялось')}
-              color={isHourly && remainingHours !== undefined && remainingHours < 0 ? '#FF453A' : statusColor}
+              value={hasLast ? formatMinutes(remainingHours) : 'Не выполнялось'}
+              color={remainingHours !== undefined && remainingHours < 0 ? '#FF453A' : statusColor}
             />
           </div>
-          {/* Нижний ряд: Ресурс / Интервал */}
           <div className="relative">
             <Metric
               label="Интервал ТО"
-              value={
-                isHourly
-                  ? formatMinutes(limitMinutes)
-                  : def.nominalDays
-                  ? `${def.nominalDays} дн.`
-                  : def.nominalMonths
-                  ? `${def.nominalMonths} мес.`
-                  : '—'
-              }
+              value={formatMinutes(limitMinutes)}
             />
             {hasLast && (
               <span className="absolute bottom-1 right-2.5 text-[9px] text-[#666]">
-                выполнено при СНЭ {formatMinutes(lastCounter)}
+                след. ТО при СНЭ {formatMinutes(lastCounter + limitMinutes)}
               </span>
             )}
           </div>
         </div>
       ) : (
+        /* Поля в режиме ДАТ (информация о выполнении) */
         <div className="space-y-2">
-          {/* Верхний ряд: 2 поля — Дата выполнения и Остаток */}
           <div className="grid grid-cols-2 gap-2">
-            <Metric label="Дата последнего ТО" value={cleanStringOrDash(lastWork?.date)} />
+            <Metric label="Дата выполнения" value={lastDate} />
             <Metric
-              label="Остаток"
-              value={dateCalc?.remainingStr || (isHourly && hasLast ? formatMinutes(remainingHours) : 'Не выполнялось')}
-              color={dateCalc && dateCalc.daysRemaining < 0 ? '#FF453A' : statusColor}
+              label="Выполнено при СНЭ"
+              value={hasLast ? formatMinutes(lastCounter) : 'Не выполнялось'}
             />
           </div>
-          {/* Нижний ряд: Дата окончания / следующий срок */}
           <Metric
-            label="Следующий срок ТО"
-            value={
-              dateCalc?.expiryDateStr !== '—'
-                ? dateCalc?.expiryDateStr || '—'
-                : isHourly && hasLast && limitMinutes > 0
-                ? `При СНЭ ${formatMinutes(lastCounter + limitMinutes)}`
-                : 'Не выполнялось'
-            }
+            label="Следующее ТО"
+            value={hasLast ? `При наработке СНЭ ${formatMinutes(lastCounter + limitMinutes)}` : 'Не выполнялось'}
           />
         </div>
       )}
 
-      {/* Полоса светофора */}
-      {isHourly && hasLast && limitMinutes > 0 && (
+      {/* Полоса светофора (расход межрегламентного интервала в часах) */}
+      {hasLast && (
         <TrafficLightBar
           percent={percentHours}
-          status={hourStatus}
+          status={status}
         />
       )}
     </article>
   );
 };
+
+// ==========================================
+// 2. КАЛЕНДАРНЫЕ РЕГЛАМЕНТЫ (Периодический 20 дн., 12 мес., 24 мес.)
+// Измеряются строго в календарных днях и датах. Никаких часов!
+// ==========================================
+interface CalendarDef {
+  kind: string;
+  name: string;
+  nominalDays?: number;
+  nominalMonths?: number;
+}
+
+const CalendarMaintenanceCard: React.FC<{
+  def: CalendarDef;
+  lastWork?: CloudMaintenanceWork;
+}> = ({ def, lastWork }) => {
+  const hasLast = !!lastWork && cleanStringOrDash(lastWork.date) !== '—';
+  const baseDate = hasLast ? parseCustomDate(lastWork.date) : null;
+
+  let expiryDate: Date | null = null;
+  let diffDays = 0;
+  let remainingStr = 'Не выполнялось';
+  let status: 'normal' | 'warning' | 'critical' | 'expired' = hasLast ? 'normal' : 'warning';
+  let percentTime = 0;
+
+  if (baseDate) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    expiryDate = new Date(baseDate);
+    if (def.nominalDays) {
+      expiryDate.setDate(expiryDate.getDate() + def.nominalDays);
+    } else if (def.nominalMonths) {
+      expiryDate.setMonth(expiryDate.getMonth() + def.nominalMonths);
+    }
+    expiryDate.setHours(0, 0, 0, 0);
+
+    const diffTime = expiryDate.getTime() - today.getTime();
+    diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    const totalDays = Math.max(1, Math.ceil((expiryDate.getTime() - baseDate.getTime()) / (1000 * 60 * 60 * 24)));
+    const elapsedDays = Math.max(0, Math.ceil((today.getTime() - baseDate.getTime()) / (1000 * 60 * 60 * 24)));
+    percentTime = (elapsedDays / totalDays) * 100;
+
+    if (diffDays < 0) {
+      remainingStr = `Просрочено (${Math.abs(diffDays)} дн.)`;
+      status = 'expired';
+    } else if (diffDays === 0) {
+      remainingStr = 'Истекает сегодня';
+      status = 'critical';
+    } else if (diffDays < 100) {
+      remainingStr = `${diffDays} дн.`;
+      status = diffDays <= (def.nominalDays ? 3 : 30) ? 'critical' : diffDays <= (def.nominalDays ? 7 : 60) ? 'warning' : 'normal';
+    } else {
+      let y = expiryDate.getFullYear() - today.getFullYear();
+      let m = expiryDate.getMonth() - today.getMonth();
+      if (expiryDate.getDate() < today.getDate()) m -= 1;
+      if (m < 0) { y -= 1; m += 12; }
+      remainingStr = `${Math.max(0, y)}г. ${Math.max(0, m)}м.`;
+      status = 'normal';
+    }
+  }
+
+  const statusColor =
+    status === 'expired' || status === 'critical'
+      ? '#FF453A'
+      : status === 'warning'
+      ? '#FFD60A'
+      : '#30D158';
+
+  const intervalLabel = def.nominalDays
+    ? `${def.nominalDays} дней`
+    : def.nominalMonths
+    ? `${def.nominalMonths} месяцев`
+    : '—';
+
+  return (
+    <article className="space-y-3 rounded-2xl border border-[#3A3A3C] bg-[#2A2A2D] p-3.5 shadow-sm transition-colors">
+      {/* Шапка */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5">
+          <Calendar className="h-4 w-4 shrink-0 text-[#229ED9]" />
+          <span className="text-[14px] font-bold text-[#F0F0F0]">
+            {def.name}
+          </span>
+          <span className="rounded-md bg-[#1C1C1E] px-1.5 py-0.5 text-[10px] font-medium text-[#888]">
+            Календарный
+          </span>
+        </div>
+        <div className="shrink-0 flex items-center justify-center p-1 rounded-full bg-[#1C1C1E]/50">
+          <StatusIcon status={status} />
+        </div>
+      </div>
+
+      {/* Поля карточки: строго календарные дни и даты */}
+      <div className="space-y-2">
+        <div className="grid grid-cols-2 gap-2">
+          <Metric
+            label="Дата последнего ТО"
+            value={hasLast && baseDate ? formatCustomDate(baseDate) : 'Не выполнялось'}
+          />
+          <Metric
+            label="Остаток"
+            value={remainingStr}
+            color={statusColor}
+          />
+        </div>
+        <div className="relative">
+          <Metric
+            label="Следующий срок ТО"
+            value={hasLast && expiryDate ? formatCustomDate(expiryDate) : 'Не выполнялось'}
+          />
+          <span className="absolute bottom-1 right-2.5 text-[9px] text-[#666]">
+            интервал: {intervalLabel}
+          </span>
+        </div>
+      </div>
+
+      {/* Полоса светофора (расход календарного интервала в днях) */}
+      {hasLast && (
+        <TrafficLightBar
+          percent={percentTime}
+          status={status}
+        />
+      )}
+    </article>
+  );
+};
+
+const HOURLY_STANDARDS: HourlyDef[] = [
+  { kind: 'HOURS_50', name: '50-часовой регламент', intervalHours: 50 },
+  { kind: 'HOURS_100', name: '100-часовой регламент', intervalHours: 100 },
+  { kind: 'HOURS_300', name: '300-часовой регламент', intervalHours: 300 },
+];
+
+const CALENDAR_STANDARDS: CalendarDef[] = [
+  { kind: 'PERIODIC', name: 'Периодический регламент', nominalDays: 20 },
+  { kind: 'REG_12', name: 'Регламент 12 месяцев', nominalMonths: 12 },
+  { kind: 'REG_24', name: 'Регламент 24 месяца', nominalMonths: 24 },
+];
 
 export const ResourcesTab: React.FC<ResourcesTabProps> = ({ profile, loading, error, onRefresh }) => {
   const [section, setSection] = useState<'aggregates' | 'oils' | 'journal'>('aggregates');
@@ -853,30 +925,65 @@ export const ResourcesTab: React.FC<ResourcesTabProps> = ({ profile, loading, er
             </button>
           </div>
 
-          {/* Вид 1: Контроль регламентов (карточки 1 в 1) */}
+          {/* Вид 1: Контроль регламентов (разделено: Часовые отдельно, Календарные отдельно) */}
           {journalView === 'due' && (
-            <div className="space-y-2.5">
-              {SCHEDULED_STANDARDS.map((def) => {
-                const candidates = profile.maintenanceWorks.filter(
-                  (w) => w.kind === def.kind || (def.kind === 'HOURS_50' && w.kind === 'HOURS_100')
-                );
-                // Находим последнее выполнение
-                const lastWork = candidates.sort((a, b) => {
-                  const bSne = Number(b.counterMinutes || 0);
-                  const aSne = Number(a.counterMinutes || 0);
-                  if (bSne !== aSne) return bSne - aSne;
-                  return Number(b.createdAt || 0) - Number(a.createdAt || 0);
-                })[0];
+            <div className="space-y-4">
+              {/* Блок 1: По наработке (Часовые регламенты) */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5 px-1 text-[11px] font-bold uppercase tracking-wider text-[#888]">
+                  <Clock3 className="h-3.5 w-3.5 text-[#229ED9]" />
+                  <span>По наработке (часовые регламенты)</span>
+                </div>
+                <div className="space-y-2.5">
+                  {HOURLY_STANDARDS.map((def) => {
+                    const candidates = profile.maintenanceWorks.filter(
+                      (w) => w.kind === def.kind || (def.kind === 'HOURS_50' && w.kind === 'HOURS_100')
+                    );
+                    const lastWork = candidates.sort((a, b) => {
+                      const bSne = Number(b.counterMinutes || 0);
+                      const aSne = Number(a.counterMinutes || 0);
+                      if (bSne !== aSne) return bSne - aSne;
+                      return Number(b.createdAt || 0) - Number(a.createdAt || 0);
+                    })[0];
 
-                return (
-                  <ScheduledWorkCard
-                    key={def.kind}
-                    def={def}
-                    lastWork={lastWork}
-                    fuselageSne={profile.fuselageSne}
-                  />
-                );
-              })}
+                    return (
+                      <HourlyMaintenanceCard
+                        key={def.kind}
+                        def={def}
+                        lastWork={lastWork}
+                        fuselageSne={profile.fuselageSne}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Блок 2: Календарные регламенты */}
+              <div className="space-y-2 pt-1">
+                <div className="flex items-center gap-1.5 px-1 text-[11px] font-bold uppercase tracking-wider text-[#888]">
+                  <Calendar className="h-3.5 w-3.5 text-[#229ED9]" />
+                  <span>Календарные регламенты (дни и месяцы)</span>
+                </div>
+                <div className="space-y-2.5">
+                  {CALENDAR_STANDARDS.map((def) => {
+                    const candidates = profile.maintenanceWorks.filter((w) => w.kind === def.kind);
+                    const lastWork = candidates.sort((a, b) => {
+                      const bDate = parseCustomDate(b.date)?.getTime() || 0;
+                      const aDate = parseCustomDate(a.date)?.getTime() || 0;
+                      if (bDate !== aDate) return bDate - aDate;
+                      return Number(b.createdAt || 0) - Number(a.createdAt || 0);
+                    })[0];
+
+                    return (
+                      <CalendarMaintenanceCard
+                        key={def.kind}
+                        def={def}
+                        lastWork={lastWork}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           )}
 
