@@ -82,11 +82,11 @@ export const LaunchCard: React.FC<LaunchCardProps> = ({ launch, index, onUpdate,
             <span className={labelClass}>Литры</span>
             <input
               type="number"
-              inputMode="decimal"
+              inputMode="numeric"
               min="0"
-              step="0.1"
+              step="1"
               value={launch.fuelingLiters ?? ''}
-              onChange={(e) => setNumber('fuelingLiters', e.target.value)}
+              onChange={(e) => setNumber('fuelingLiters', e.target.value, true)}
               placeholder="0"
               className={inputClass}
             />

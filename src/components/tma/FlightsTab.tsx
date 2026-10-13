@@ -105,11 +105,15 @@ export const FlightsTab: React.FC<FlightsTabProps> = ({ activeBoard }) => {
       };
 
       // Отправляем прямо в облако Supabase!
-      await TelegramMiniAppService.submitFlightToCloud(flightData);
+      const result = await TelegramMiniAppService.submitFlightToCloud(flightData);
       triggerHapticNotification('success');
 
       const tg = getTelegramWebApp();
-      const successMsg = 'Полёты отправлены. Запустите синхронизацию в LogBook на телефоне или ПК.';
+      const successMsg = result.addedLaunches === 0
+        ? 'Этот запуск уже записан. Повтор не добавлен.'
+        : result.skippedDuplicates > 0
+        ? `Добавлено запусков: ${result.addedLaunches}. Повторы пропущены. Синхронизируйте LogBook.`
+        : 'Полёты отправлены. Запустите синхронизацию в LogBook на телефоне или ПК.';
       if (tg?.showAlert) {
         tg.showAlert(successMsg);
       }

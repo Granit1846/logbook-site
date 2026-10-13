@@ -2,6 +2,8 @@
 
 import { supabase } from '@/lib/supabase';
 import { cloudDate, normalizeFlightDays } from '@/lib/flightDateSync';
+import { aggregateSne } from '@/lib/resourceMath';
+import { sameLaunchContents } from '@/lib/flightLaunchSync';
 
 export interface FlightEntryDraft {
   id: string;
@@ -195,7 +197,7 @@ export const TelegramMiniAppService = {
     localStorage.setItem(`${STORAGE_KEY_RESOURCES}_${boardNumber}`, JSON.stringify(resources));
   },
 
-  async submitFlightToCloud(flight: FlightEntryDraft): Promise<{ revision: number }> {
+  async submitFlightToCloud(flight: FlightEntryDraft): Promise<{ revision: number; addedLaunches: number; skippedDuplicates: number }> {
     const sessionRes = await supabase.auth.getSession();
     const user = sessionRes?.data?.session?.user;
     if (!user) {
@@ -269,9 +271,10 @@ export const TelegramMiniAppService = {
       : 0;
 
     let addedAirMinutes = 0;
+    let addedLaunches = 0;
+    let skippedDuplicates = 0;
     flight.launches.forEach((launch) => {
       const air = Number(launch.vozduh || 0);
-      addedAirMinutes += air;
       const liters = Number(launch.fuelingLiters || 0);
       const density = Number(launch.fuelDensity || 0);
       const kg = liters > 0 && density > 0 ? Number((liters * density).toFixed(2)) : 0;
@@ -279,7 +282,7 @@ export const TelegramMiniAppService = {
       const launchRecord: Record<string, any> = {
         id: crypto.randomUUID(),
         dayId: dayId,
-        order: nextOrder++,
+        order: nextOrder,
         vsu: Number(launch.vsu || 0),
         zemlya: Number(launch.zemlya || 0),
         vozduh: air,
@@ -304,7 +307,16 @@ export const TelegramMiniAppService = {
         }
       }
 
+      const duplicate = exchange.tables.launches.some((existing: Record<string, unknown>) =>
+        String(existing.dayId) === String(dayId) && sameLaunchContents(existing, launchRecord));
+      if (duplicate) {
+        skippedDuplicates++;
+        return;
+      }
       exchange.tables.launches.push(launchRecord);
+      nextOrder++;
+      addedLaunches++;
+      addedAirMinutes += air;
     });
 
     // Обновляем СНК (перезаписываем или добавляем)
@@ -360,24 +372,13 @@ export const TelegramMiniAppService = {
     }
 
     if (Array.isArray(resources) && resources.length > 0) {
-      const updatedResources = resources.map((item: any, idx: number) => {
-        const isFuselage = item.name === 'Фюзеляж' || idx === 0;
+      const updatedResources = resources.map((item: any) => {
+        const isFuselage = item.name === 'Фюзеляж';
         const inst1 = Number(item.installedAtSne1 || 0);
         const inst2 = Number(item.installedAtSne2 || 0);
 
-        // Для фюзеляжа — СНЭ равен налёту планера.
-        // Для остальных агрегатов:
-        // Если агрегат установлен с наработками: currentSne = newFuselageSne - inst1 + inst2
-        // Иначе: СНЭ агрегата увеличивается на налёт addedAirMinutes
-        let currentSne: number;
-        if (isFuselage) {
-          currentSne = newFuselageSne;
-        } else if (inst1 > 0 || inst2 > 0) {
-          currentSne = Math.max(0, newFuselageSne - inst1 + inst2);
-        } else {
-          const prevSne = Number(item.sne || 0);
-          currentSne = prevSne > 0 ? prevSne + addedAirMinutes : newFuselageSne;
-        }
+        // Та же формула, что в Android LogBook: планер − СНЭ при установке + наработка агрегата при установке.
+        const currentSne = aggregateSne(newFuselageSne, inst1, inst2, isFuselage);
 
         // Назначенный ресурс в минутах (extendedTo1)
         const rawLimit = Number(item.extendedTo1 || 0);
@@ -424,7 +425,7 @@ export const TelegramMiniAppService = {
 
     this.saveFlight(flight);
 
-    return { revision: Number(reply.revision) };
+    return { revision: Number(reply.revision), addedLaunches, skippedDuplicates };
   },
 
   async repairCloudFlightDates(): Promise<{ revision: number; dates: number; mergedDays: number }> {

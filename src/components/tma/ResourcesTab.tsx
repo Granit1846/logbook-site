@@ -14,6 +14,7 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import type { CloudProfileData, CloudOilResource, CloudMaintenanceWork } from '@/lib/tmaService';
+import { addCalendarMonths, aggregateSne, calendarDaysBetween, hourStatus as calculateHourStatus, maintenanceStatus, oilRemaining, parseResourceDate, resourceCalendarStatus, resourceExpiry } from '@/lib/resourceMath';
 
 interface ResourcesTabProps {
   profile?: CloudProfileData;
@@ -101,60 +102,14 @@ function formatCustomDate(date: Date): string {
   return `${day}.${month}.${year}`;
 }
 
-// Определение статуса по часам/минутам (отрицательное — ВСЕГДА expired)
-function getMinutesStatus(
-  remaining: number,
-  limit?: number
-): 'normal' | 'warning' | 'critical' | 'expired' {
-  if (remaining < 0) {
-    return 'expired';
-  }
-  if (remaining === 0 && (limit || 0) > 0) {
-    return 'expired';
-  }
-
-  if (limit && limit > 0) {
-    const percentRemaining = (remaining / limit) * 100;
-    if (remaining <= 20 * 60 || percentRemaining <= 5) {
-      return 'critical';
-    }
-    if (remaining <= 50 * 60 || percentRemaining <= 10) {
-      return 'warning';
-    }
-    return 'normal';
-  }
-
-  if (remaining <= 20 * 60) {
-    return 'critical';
-  }
-  if (remaining <= 50 * 60) {
-    return 'warning';
-  }
-  return 'normal';
-}
-
 function calculateDates(
   issueDateRaw?: string,
   yearsResourceRaw?: string,
-  extendedTo2Raw?: string
+  kind: 'aggregate' | 'oil' = 'aggregate'
 ): DateCalcResult | null {
-  const issue = parseCustomDate(issueDateRaw);
+  const issue = parseResourceDate(issueDateRaw);
   if (!issue) return null;
-
-  const yearsClean = cleanStringOrDash(yearsResourceRaw);
-  const years = yearsClean !== '—' ? parseFloat(yearsClean.replace(',', '.')) : NaN;
-  let expiry: Date | null = null;
-
-  const extendedDate = parseCustomDate(extendedTo2Raw);
-  if (extendedDate) {
-    expiry = extendedDate;
-  } else if (!isNaN(years) && years > 0) {
-    expiry = new Date(issue.getFullYear() + Math.floor(years), issue.getMonth(), issue.getDate());
-    const fractionalMonths = Math.round((years - Math.floor(years)) * 12);
-    if (fractionalMonths > 0) {
-      expiry.setMonth(expiry.getMonth() + fractionalMonths);
-    }
-  }
+  const expiry = resourceExpiry(issueDateRaw, yearsResourceRaw, kind);
 
   if (!expiry) {
     return {
@@ -171,21 +126,17 @@ function calculateDates(
   const expiryNorm = new Date(expiry);
   expiryNorm.setHours(0, 0, 0, 0);
 
-  const diffTime = expiryNorm.getTime() - today.getTime();
-  const days = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  const days = calendarDaysBetween(today, expiryNorm);
 
   let remainingStr = '';
-  let status: 'normal' | 'warning' | 'critical' | 'expired' = 'normal';
+  const status = resourceCalendarStatus(today, expiryNorm, kind);
 
   if (days < 0) {
     remainingStr = `Просрочено (${Math.abs(days)} дн.)`;
-    status = 'expired';
   } else if (days === 0) {
     remainingStr = 'Истекает сегодня';
-    status = 'critical';
-  } else if (days < 100) {
+  } else if (days < 30) {
     remainingStr = `${days} дн.`;
-    status = days <= 30 ? 'critical' : 'warning';
   } else {
     let y = expiryNorm.getFullYear() - today.getFullYear();
     let m = expiryNorm.getMonth() - today.getMonth();
@@ -197,7 +148,6 @@ function calculateDates(
       m += 12;
     }
     remainingStr = `${Math.max(0, y)}г. ${Math.max(0, m)}м.`;
-    status = 'normal';
   }
 
   return {
@@ -273,28 +223,15 @@ const TrafficLightBar = ({
 const AggregateCard: React.FC<{
   item: CloudProfileData['aggregates'][0];
   fuselageSne: number;
-  isFirst?: boolean;
-}> = ({ item, fuselageSne, isFirst }) => {
+}> = ({ item, fuselageSne }) => {
   const [showDates, setShowDates] = useState(false);
 
-  // СНЭ агрегата: рассчитывается динамически от налёта планера (точно как в маслах)
-  const isFuselage = isFirst || item.name === 'Фюзеляж';
+  // Те же единицы и формула, что в Android LogBook.
+  const isFuselage = item.name === 'Фюзеляж';
   const inst1 = Number(item.installedAtSne1 || 0);
   const inst2 = Number(item.installedAtSne2 || 0);
 
-  let sne: number;
-  if (fuselageSne > 0) {
-    if (isFuselage) {
-      sne = fuselageSne;
-    } else if (inst1 > 0 || inst2 > 0) {
-      sne = Math.max(0, fuselageSne - inst1 + inst2);
-    } else {
-      const baseSne = Number(item.sne || 0);
-      sne = baseSne > fuselageSne ? baseSne : fuselageSne;
-    }
-  } else {
-    sne = Number(item.sne || 0);
-  }
+  const sne = aggregateSne(fuselageSne, inst1, inst2, isFuselage);
 
   // Назначенный ресурс (extendedTo1). Если не задан или <= 0 — ресурса в часах нет!
   const rawLimit = Number(item.extendedTo1 || 0);
@@ -307,16 +244,15 @@ const AggregateCard: React.FC<{
   // Статус по часам
   let hourStatus: 'normal' | 'warning' | 'critical' | 'expired' = 'normal';
   if (hasHourLimit && remaining !== undefined) {
-    hourStatus = getMinutesStatus(remaining, limit);
+    hourStatus = calculateHourStatus(remaining, 'aggregate');
   }
 
-  // Расчет дат (только если задана дата выпуска и срок)
+  // Календарный ресурс: дата выпуска + округлённое число лет × 365 дней.
   const hasIssueDate = !!(item.issueDate && cleanStringOrDash(item.issueDate) !== '—');
   const hasYears = !!(item.yearsResource && cleanStringOrDash(item.yearsResource) !== '—');
-  const hasExtended2 = !!(item.extendedTo2 && cleanStringOrDash(item.extendedTo2) !== '—');
 
-  const dateCalc = (hasIssueDate && (hasYears || hasExtended2))
-    ? calculateDates(item.issueDate, item.yearsResource, item.extendedTo2)
+  const dateCalc = (hasIssueDate && hasYears)
+    ? calculateDates(item.issueDate, item.yearsResource, 'aggregate')
     : null;
 
   const dateStatus = dateCalc ? dateCalc.status : 'normal';
@@ -426,14 +362,14 @@ const OilCard: React.FC<{ item: CloudOilResource; fuselageSne: number }> = ({ it
   const limit = hasHourLimit ? rawLimit : 0;
 
   // Наработка масла
-  const used = Math.max(0, fuselageSne - pouredAtSne);
+  const used = fuselageSne - pouredAtSne;
 
   // Остаток по маслу
-  const remaining = hasHourLimit ? limit - used : undefined;
+  const remaining = hasHourLimit ? oilRemaining(fuselageSne, pouredAtSne, limit) : undefined;
 
   let hourStatus: 'normal' | 'warning' | 'critical' | 'expired' = 'normal';
   if (hasHourLimit && remaining !== undefined) {
-    hourStatus = getMinutesStatus(remaining, limit);
+    hourStatus = calculateHourStatus(remaining, 'oil');
   }
 
   // Расчёт дат
@@ -441,7 +377,7 @@ const OilCard: React.FC<{ item: CloudOilResource; fuselageSne: number }> = ({ it
   const hasTerm = !!(item.term && cleanStringOrDash(item.term) !== '—');
 
   const dateCalc = (hasYears && hasTerm)
-    ? calculateDates(item.byYears, item.term)
+    ? calculateDates(item.byYears, item.term, 'oil')
     : null;
 
   const dateStatus = dateCalc ? dateCalc.status : 'normal';
@@ -563,7 +499,7 @@ const HourlyMaintenanceCard: React.FC<{
   const lastCounter = Number(lastWork?.counterMinutes || 0);
 
   // Наработка с момента выполнения ТО
-  const usedHours = hasLast ? Math.max(0, fuselageSne - lastCounter) : undefined;
+  const usedHours = hasLast ? fuselageSne - lastCounter : undefined;
   const remainingHours = usedHours !== undefined ? limitMinutes - usedHours : undefined;
 
   const percentHours = limitMinutes > 0 && usedHours !== undefined
@@ -572,8 +508,10 @@ const HourlyMaintenanceCard: React.FC<{
     ? 100
     : 0;
 
-  const status = remainingHours !== undefined
-    ? getMinutesStatus(remainingHours, limitMinutes)
+  const [lowerHours, upperHours] = def.intervalHours === 50 ? [45, 60]
+    : def.intervalHours === 100 ? [90, 120] : [285, 330];
+  const status = usedHours !== undefined
+    ? maintenanceStatus(usedHours, lowerHours * 60, limitMinutes, upperHours * 60)
     : hasLast
     ? 'normal'
     : 'warning';
@@ -694,36 +632,36 @@ const CalendarMaintenanceCard: React.FC<{
     today.setHours(0, 0, 0, 0);
 
     expiryDate = new Date(baseDate);
-    if (def.nominalDays) {
-      expiryDate.setDate(expiryDate.getDate() + def.nominalDays);
-    } else if (def.nominalMonths) {
-      expiryDate.setMonth(expiryDate.getMonth() + def.nominalMonths);
-    }
+    if (def.nominalDays) expiryDate.setDate(expiryDate.getDate() + def.nominalDays);
+    else if (def.nominalMonths) expiryDate = addCalendarMonths(baseDate, def.nominalMonths);
     expiryDate.setHours(0, 0, 0, 0);
 
-    const diffTime = expiryDate.getTime() - today.getTime();
-    diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    diffDays = calendarDaysBetween(today, expiryDate);
 
-    const totalDays = Math.max(1, Math.ceil((expiryDate.getTime() - baseDate.getTime()) / (1000 * 60 * 60 * 24)));
-    const elapsedDays = Math.max(0, Math.ceil((today.getTime() - baseDate.getTime()) / (1000 * 60 * 60 * 24)));
+    const totalDays = Math.max(1, calendarDaysBetween(baseDate, expiryDate));
+    const elapsedDays = Math.max(0, calendarDaysBetween(baseDate, today));
     percentTime = (elapsedDays / totalDays) * 100;
 
+    const lowerDate = def.nominalDays ? new Date(baseDate) : addCalendarMonths(baseDate, def.nominalMonths || 0);
+    if (def.nominalDays) lowerDate.setDate(lowerDate.getDate() + 15);
+    const upperDate = def.nominalDays ? new Date(baseDate) : addCalendarMonths(baseDate, (def.nominalMonths || 0) + (def.nominalMonths === 12 ? 1 : 2));
+    if (def.nominalDays) upperDate.setDate(upperDate.getDate() + 25);
+    status = maintenanceStatus(elapsedDays, calendarDaysBetween(baseDate, lowerDate), totalDays, calendarDaysBetween(baseDate, upperDate));
+
     if (diffDays < 0) {
-      remainingStr = `Просрочено (${Math.abs(diffDays)} дн.)`;
-      status = 'expired';
+      remainingStr = status === 'expired'
+        ? `Просрочено (${Math.abs(diffDays)} дн.)`
+        : `Плановый срок прошёл (${Math.abs(diffDays)} дн.)`;
     } else if (diffDays === 0) {
       remainingStr = 'Истекает сегодня';
-      status = 'critical';
     } else if (diffDays < 100) {
       remainingStr = `${diffDays} дн.`;
-      status = diffDays <= (def.nominalDays ? 3 : 30) ? 'critical' : diffDays <= (def.nominalDays ? 7 : 60) ? 'warning' : 'normal';
     } else {
       let y = expiryDate.getFullYear() - today.getFullYear();
       let m = expiryDate.getMonth() - today.getMonth();
       if (expiryDate.getDate() < today.getDate()) m -= 1;
       if (m < 0) { y -= 1; m += 12; }
       remainingStr = `${Math.max(0, y)}г. ${Math.max(0, m)}м.`;
-      status = 'normal';
     }
   }
 
@@ -894,7 +832,6 @@ export const ResourcesTab: React.FC<ResourcesTabProps> = ({ profile, loading, er
               key={index}
               item={item}
               fuselageSne={profile.fuselageSne}
-              isFirst={index === 0}
             />
           ))}
         </div>
