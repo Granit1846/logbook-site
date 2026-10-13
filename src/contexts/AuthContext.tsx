@@ -10,6 +10,7 @@ interface AuthContextValue {
   isAdmin: boolean;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
+  signInWithTelegramUser: (tgUser: { id: number; first_name?: string; username?: string }) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
 }
 
@@ -38,13 +39,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: error?.message ?? null };
   };
 
+  const signInWithTelegramUser = async (tgUser: { id: number; first_name?: string; username?: string }) => {
+    try {
+      const { data, error } = await supabase.rpc('logbook_telegram_confirm_auth', {
+        p_code: 'tma_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+        p_telegram_id: tgUser.id,
+        p_first_name: tgUser.first_name || '',
+        p_username: tgUser.username || ''
+      });
+      if (error) {
+        return { error: error.message };
+      }
+      if (data && (data as any).email && (data as any).password) {
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email: (data as any).email,
+          password: (data as any).password
+        });
+        return { error: signInError?.message ?? null };
+      }
+      return { error: 'Не удалось получить данные аккаунта Telegram' };
+    } catch (e: any) {
+      return { error: e.message || 'Ошибка авторизации через Telegram' };
+    }
+  };
+
   const signOut = async () => {
     await supabase.auth.signOut();
   };
 
   return (
     <AuthContext.Provider
-      value={{ session, user: session?.user ?? null, isAdmin: session?.user?.email === ADMIN_EMAIL, loading, signIn, signOut }}
+      value={{ session, user: session?.user ?? null, isAdmin: session?.user?.email === ADMIN_EMAIL, loading, signIn, signInWithTelegramUser, signOut }}
     >
       {children}
     </AuthContext.Provider>

@@ -18,7 +18,7 @@ export const TelegramMiniApp: React.FC = () => {
   const [password, setPassword] = useState('');
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState('');
-  const { user, loading: authLoading, signIn, signOut } = useAuth();
+  const { user, loading: authLoading, signIn, signInWithTelegramUser, signOut } = useAuth();
   const inTelegram = isRunningInTelegram();
   const localProfiles = useMemo(() => TelegramMiniAppService.getBoards(), []);
 
@@ -48,6 +48,19 @@ export const TelegramMiniApp: React.FC = () => {
   }, [user]);
 
   useEffect(() => { void loadCloudProfiles(); }, [loadCloudProfiles]);
+
+  useEffect(() => {
+    const tg = getTelegramWebApp();
+    const tgUser = tg?.initDataUnsafe?.user;
+    if (tgUser && !user && !authLoading && !authBusy) {
+      setAuthBusy(true);
+      signInWithTelegramUser(tgUser)
+        .then((res) => {
+          if (res.error) setAuthError(res.error);
+        })
+        .finally(() => setAuthBusy(false));
+    }
+  }, [user, authLoading, signInWithTelegramUser]);
 
   useEffect(() => {
     const tg = getTelegramWebApp();
@@ -115,11 +128,26 @@ export const TelegramMiniApp: React.FC = () => {
         {!user && (
           <button
             type="button"
-            onClick={() => { triggerHaptic('light'); setSettingsOpen(true); }}
+            onClick={async () => {
+              triggerHaptic('light');
+              const tgUser = getTelegramWebApp()?.initDataUnsafe?.user;
+              if (tgUser) {
+                setAuthBusy(true);
+                setAuthError('');
+                const res = await signInWithTelegramUser(tgUser);
+                setAuthBusy(false);
+                if (res.error) {
+                  setSettingsOpen(true);
+                  setAuthError(res.error);
+                }
+              } else {
+                setSettingsOpen(true);
+              }
+            }}
             className="mt-2.5 flex w-full items-center justify-between rounded-lg border border-[#FFD60A]/30 bg-[#FFD60A]/10 px-3 py-2 text-left text-[11px] text-[#FFD60A] transition-colors hover:bg-[#FFD60A]/20"
           >
-            <span>Войдите в аккаунт для отправки данных в LogBook</span>
-            <span className="font-semibold underline">Войти ➔</span>
+            <span>{authBusy ? 'Выполняется вход через Telegram…' : 'Войдите в аккаунт для отправки данных в LogBook'}</span>
+            <span className="font-semibold underline">{authBusy ? '⏳' : 'Войти ➔'}</span>
           </button>
         )}
       </div>
@@ -189,13 +217,40 @@ export const TelegramMiniApp: React.FC = () => {
                     <button onClick={() => void signOut()} className="h-11 w-full rounded-xl border border-[#3A3A3C] text-[#CCC]">Выйти из аккаунта</button>
                   </>
                 ) : (
-                  <form onSubmit={submitLogin} className="space-y-2.5">
-                    <p>Войдите в тот же аккаунт, который используется для синхронизации LogBook.</p>
-                    <input type="email" autoComplete="email" required placeholder="Электронная почта" value={email} onChange={(event) => setEmail(event.target.value)} className="h-11 w-full rounded-xl border border-[#3A3A3C] bg-[#1C1C1E] px-3 text-[13px] outline-none focus:border-[#229ED9]" />
-                    <input type="password" autoComplete="current-password" required placeholder="Пароль" value={password} onChange={(event) => setPassword(event.target.value)} className="h-11 w-full rounded-xl border border-[#3A3A3C] bg-[#1C1C1E] px-3 text-[13px] outline-none focus:border-[#229ED9]" />
-                    {authError && <p className="text-[#FF7068]">{authError}</p>}
-                    <button type="submit" disabled={authBusy} className="h-11 w-full rounded-xl bg-[#229ED9] font-semibold text-white disabled:opacity-50">{authBusy ? 'Вход…' : 'Войти'}</button>
-                  </form>
+                  <div className="space-y-3">
+                    {getTelegramWebApp()?.initDataUnsafe?.user && (
+                      <div className="space-y-2 rounded-xl bg-[#1C1C1E] p-3">
+                        <span className="block text-[11px] text-[#AAA]">
+                          Telegram: <b>{getTelegramWebApp()?.initDataUnsafe?.user?.first_name}</b> (@{getTelegramWebApp()?.initDataUnsafe?.user?.username || '—'})
+                        </span>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            triggerHaptic('light');
+                            const tgUser = getTelegramWebApp()?.initDataUnsafe?.user;
+                            if (!tgUser) return;
+                            setAuthBusy(true);
+                            setAuthError('');
+                            const res = await signInWithTelegramUser(tgUser);
+                            setAuthBusy(false);
+                            if (res.error) setAuthError(res.error);
+                          }}
+                          disabled={authBusy}
+                          className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#229ED9] font-semibold text-white shadow transition-all active:scale-[0.98] disabled:opacity-50"
+                        >
+                          {authBusy ? 'Вход…' : 'Войти через Telegram (в 1 клик)'}
+                        </button>
+                      </div>
+                    )}
+
+                    <form onSubmit={submitLogin} className="space-y-2.5">
+                      <p className="text-[11px]">Или войдите по электронной почте и паролю:</p>
+                      <input type="email" autoComplete="email" required placeholder="Электронная почта" value={email} onChange={(event) => setEmail(event.target.value)} className="h-11 w-full rounded-xl border border-[#3A3A3C] bg-[#1C1C1E] px-3 text-[13px] outline-none focus:border-[#229ED9]" />
+                      <input type="password" autoComplete="current-password" required placeholder="Пароль" value={password} onChange={(event) => setPassword(event.target.value)} className="h-11 w-full rounded-xl border border-[#3A3A3C] bg-[#1C1C1E] px-3 text-[13px] outline-none focus:border-[#229ED9]" />
+                      {authError && <p className="text-[#FF7068]">{authError}</p>}
+                      <button type="submit" disabled={authBusy} className="h-11 w-full rounded-xl border border-[#3A3A3C] bg-[#1C1C1E] font-semibold text-white hover:bg-white/5 disabled:opacity-50">{authBusy ? 'Вход…' : 'Войти по почте'}</button>
+                    </form>
+                  </div>
                 )}
                 <p>Настройки используются для входа в аккаунт, обновления данных Supabase и выхода. Профиль выбирается над вкладками.</p>
               </div>
