@@ -212,13 +212,13 @@ function calculateDates(
 const StatusIcon = ({ status }: { status: 'normal' | 'warning' | 'critical' | 'expired' }) => {
   switch (status) {
     case 'normal':
-      return <ThumbsUp className="h-5 w-5 text-[#30D158]" title="Зеленый сектор — норма" />;
+      return <ThumbsUp className="h-5 w-5 text-[#30D158]" aria-label="Зеленый сектор — норма" />;
     case 'warning':
-      return <AlertTriangle className="h-5 w-5 text-[#FFD60A]" title="Желтый сектор — внимание" />;
+      return <AlertTriangle className="h-5 w-5 text-[#FFD60A]" aria-label="Желтый сектор — внимание" />;
     case 'critical':
-      return <AlertCircle className="h-5 w-5 text-[#FF453A]" title="Красный сектор — критический" />;
+      return <AlertCircle className="h-5 w-5 text-[#FF453A]" aria-label="Красный сектор — критический" />;
     case 'expired':
-      return <Ban className="h-5 w-5 text-[#FF453A]" title="Просрочено" />;
+      return <Ban className="h-5 w-5 text-[#FF453A]" aria-label="Просрочено" />;
   }
 };
 

@@ -1,6 +1,7 @@
 // Service for Telegram Mini App data storage, drafts and sync
 
 import { supabase } from '@/lib/supabase';
+import { cloudDate, normalizeFlightDays } from '@/lib/flightDateSync';
 
 export interface FlightEntryDraft {
   id: string;
@@ -224,21 +225,18 @@ export const TelegramMiniAppService = {
     if (!Array.isArray(exchange.tables.launches)) exchange.tables.launches = [];
     if (!Array.isArray(exchange.tables.snk_values)) exchange.tables.snk_values = [];
 
+    normalizeFlightDays(exchange.tables);
+
     const targetProfile = exchange.tables.profiles.find((p: any) => String(p.boardNumber) === String(flight.boardNumber));
     if (!targetProfile) {
       throw new Error(`Профиль борта №${flight.boardNumber} не найден в синхронизации LogBook. Убедитесь, что борт есть в основном приложении.`);
     }
 
     // Образец существующих записей для получения точной схемы таблицы
-    const existingDay = exchange.tables.days[0];
     const existingLaunch = exchange.tables.launches[0];
 
-    // Форматируем дату в DD.MM.YYYY если пришла YYYY-MM-DD
-    let formattedDate = flight.date;
-    if (/^\d{4}-\d{2}-\d{2}$/.test(formattedDate)) {
-      const [yyyy, mm, dd] = formattedDate.split('-');
-      formattedDate = `${dd}.${mm}.${yyyy}`;
-    }
+    // В обменном пакете Android даты всегда имеют формат YYYY-MM-DD.
+    const formattedDate = cloudDate(flight.date);
 
     // Проверяем, существует ли уже запись для этого дня (по profileId и date)
     let dayRecord = exchange.tables.days.find(
@@ -427,6 +425,35 @@ export const TelegramMiniAppService = {
     this.saveFlight(flight);
 
     return { revision: Number(reply.revision) };
+  },
+
+  async repairCloudFlightDates(): Promise<{ revision: number; dates: number; mergedDays: number }> {
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (!sessionData.session?.user) throw new Error('Не выполнен вход в аккаунт!');
+
+    const { data, error } = await supabase.rpc('logbook_sync_pull_v1');
+    if (error) throw new Error(error.message);
+    const response = Array.isArray(data) ? data[0] : data;
+    if (!response?.payload) throw new Error('В облаке нет данных');
+
+    const exchange = typeof response.payload === 'string' ? JSON.parse(response.payload) : response.payload;
+    if (!Array.isArray(exchange?.tables?.days) || !Array.isArray(exchange.tables.launches) ||
+        !Array.isArray(exchange.tables.snk_values)) throw new Error('Некорректный формат полётов в облаке');
+
+    const repaired = normalizeFlightDays(exchange.tables);
+    if (repaired.dates === 0 && repaired.mergedDays === 0) {
+      return { revision: Number(response.revision), ...repaired };
+    }
+
+    const { data: commitData, error: commitError } = await supabase.rpc('logbook_sync_commit_v1', {
+      p_change_id: crypto.randomUUID(),
+      p_expected_revision: Number(response.revision),
+      p_payload: exchange,
+    });
+    if (commitError) throw new Error(commitError.message);
+    const reply = Array.isArray(commitData) ? commitData[0] : commitData;
+    if (!reply?.accepted) throw new Error('Данные в облаке изменились. Повторите восстановление.');
+    return { revision: Number(reply.revision), ...repaired };
   },
 
   async clearCloudDays(): Promise<{ revision: number }> {

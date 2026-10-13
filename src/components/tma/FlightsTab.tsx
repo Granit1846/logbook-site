@@ -105,11 +105,11 @@ export const FlightsTab: React.FC<FlightsTabProps> = ({ activeBoard }) => {
       };
 
       // Отправляем прямо в облако Supabase!
-      const res = await TelegramMiniAppService.submitFlightToCloud(flightData);
+      await TelegramMiniAppService.submitFlightToCloud(flightData);
       triggerHapticNotification('success');
 
       const tg = getTelegramWebApp();
-      const successMsg = `Полёты за ${formatDateDisplay(date)} (борт №${activeBoard}) успешно отправлены в базу LogBook (ревизия ${res.revision})! Теперь нажмите «Синхронизация» в приложении на телефоне/ПК.`;
+      const successMsg = 'Полёты отправлены. Запустите синхронизацию в LogBook на телефоне или ПК.';
       if (tg?.showAlert) {
         tg.showAlert(successMsg);
       }

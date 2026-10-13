@@ -148,6 +148,25 @@ export const TelegramMiniApp: React.FC = () => {
                     <button onClick={() => void loadCloudProfiles()} disabled={cloudLoading} className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#229ED9] font-semibold text-white disabled:opacity-50"><RefreshCw className={`h-4 w-4 ${cloudLoading ? 'animate-spin' : ''}`} />Обновить данные из Supabase</button>
                     <button
                       onClick={async () => {
+                        setCloudLoading(true);
+                        try {
+                          const result = await TelegramMiniAppService.repairCloudFlightDates();
+                          alert(result.dates || result.mergedDays
+                            ? `Даты восстановлены: ${result.dates}, объединено дней: ${result.mergedDays}. Теперь запустите синхронизацию в LogBook.`
+                            : 'Даты полётов в облаке уже в порядке.');
+                        } catch (error) {
+                          alert(error instanceof Error ? error.message : 'Не удалось восстановить даты полётов');
+                        } finally {
+                          setCloudLoading(false);
+                        }
+                      }}
+                      disabled={cloudLoading}
+                      className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-[#229ED9]/40 bg-[#229ED9]/10 font-semibold text-[#73C7F0] disabled:opacity-50"
+                    >
+                      Восстановить даты полётов
+                    </button>
+                    <button
+                      onClick={async () => {
                         triggerHaptic('medium');
                         if (!window.confirm('Очистить записи полётов (дни/запуски) в облаке Supabase? Сами профили и ресурсы останутся нетронутыми.')) return;
                         try {
