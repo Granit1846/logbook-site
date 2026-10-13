@@ -48,6 +48,18 @@ export function calendarDaysBetween(today: Date, expiry: Date): number {
     Date.UTC(today.getFullYear(), today.getMonth(), today.getDate())) / 86_400_000);
 }
 
+export function calendarProgress(start: Date, expiry: Date, today: Date): { totalDays: number; elapsedDays: number; remainingDays: number; percent: number } {
+  const totalDays = Math.max(0, calendarDaysBetween(start, expiry));
+  const elapsedDays = Math.max(0, calendarDaysBetween(start, today));
+  const remainingDays = calendarDaysBetween(today, expiry);
+  return {
+    totalDays,
+    elapsedDays,
+    remainingDays,
+    percent: totalDays > 0 ? Math.min(100, elapsedDays / totalDays * 100) : remainingDays <= 0 ? 100 : 0,
+  };
+}
+
 export function addCalendarMonths(start: Date, months: number): Date {
   const result = new Date(start);
   result.setDate(1);

@@ -14,7 +14,7 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import type { CloudProfileData, CloudOilResource, CloudMaintenanceWork } from '@/lib/tmaService';
-import { addCalendarMonths, aggregateSne, calendarDaysBetween, hourStatus as calculateHourStatus, maintenanceStatus, oilRemaining, parseResourceDate, resourceCalendarStatus, resourceExpiry } from '@/lib/resourceMath';
+import { addCalendarMonths, aggregateSne, calendarDaysBetween, calendarProgress, hourStatus as calculateHourStatus, maintenanceStatus, oilRemaining, parseResourceDate, resourceCalendarStatus, resourceExpiry } from '@/lib/resourceMath';
 
 interface ResourcesTabProps {
   profile?: CloudProfileData;
@@ -56,6 +56,8 @@ interface DateCalcResult {
   expiryDateStr: string;
   remainingStr: string;
   daysRemaining: number;
+  totalDays: number;
+  percent: number;
   status: 'normal' | 'warning' | 'critical' | 'expired';
 }
 
@@ -117,6 +119,8 @@ function calculateDates(
       expiryDateStr: '—',
       remainingStr: '—',
       daysRemaining: 99999,
+      totalDays: 0,
+      percent: 0,
       status: 'normal',
     };
   }
@@ -126,7 +130,8 @@ function calculateDates(
   const expiryNorm = new Date(expiry);
   expiryNorm.setHours(0, 0, 0, 0);
 
-  const days = calendarDaysBetween(today, expiryNorm);
+  const progress = calendarProgress(issue, expiryNorm, today);
+  const days = progress.remainingDays;
 
   let remainingStr = '';
   const status = resourceCalendarStatus(today, expiryNorm, kind);
@@ -135,26 +140,15 @@ function calculateDates(
     remainingStr = `Просрочено (${Math.abs(days)} дн.)`;
   } else if (days === 0) {
     remainingStr = 'Истекает сегодня';
-  } else if (days < 30) {
-    remainingStr = `${days} дн.`;
-  } else {
-    let y = expiryNorm.getFullYear() - today.getFullYear();
-    let m = expiryNorm.getMonth() - today.getMonth();
-    if (expiryNorm.getDate() < today.getDate()) {
-      m -= 1;
-    }
-    if (m < 0) {
-      y -= 1;
-      m += 12;
-    }
-    remainingStr = `${Math.max(0, y)}г. ${Math.max(0, m)}м.`;
-  }
+  } else remainingStr = `${days} дн.`;
 
   return {
     issueDateStr: formatCustomDate(issue),
     expiryDateStr: formatCustomDate(expiry),
     remainingStr,
     daysRemaining: days,
+    totalDays: progress.totalDays,
+    percent: progress.percent,
     status,
   };
 }
@@ -172,12 +166,26 @@ const StatusIcon = ({ status }: { status: 'normal' | 'warning' | 'critical' | 'e
   }
 };
 
+const statusLabel = { normal: 'Норма', warning: 'Внимание', critical: 'Критический остаток', expired: 'Ресурс исчерпан' };
+
+const ResourceStatusIcons = ({ hour, days }: {
+  hour?: 'normal' | 'warning' | 'critical' | 'expired';
+  days?: 'normal' | 'warning' | 'critical' | 'expired';
+}) => (hour || days) ? (
+  <div className="flex shrink-0 items-center gap-1" aria-label="Состояние ресурса">
+    {hour && <span className="flex items-center gap-0.5 rounded-lg bg-[#1C1C1E] px-1 py-1" title={`По часам: ${statusLabel[hour]}`}><Clock3 className="h-3 w-3 text-[#999]" /><StatusIcon status={hour} /></span>}
+    {days && <span className="flex items-center gap-0.5 rounded-lg bg-[#1C1C1E] px-1 py-1" title={`По дням: ${statusLabel[days]}`}><Calendar className="h-3 w-3 text-[#999]" /><StatusIcon status={days} /></span>}
+  </div>
+) : null;
+
 const TrafficLightBar = ({
   percent,
   status,
+  label,
 }: {
   percent: number;
   status: 'normal' | 'warning' | 'critical' | 'expired';
+  label: string;
 }) => {
   const clampedPercent = Math.max(0, Math.min(100, percent));
   const activeColor =
@@ -189,6 +197,7 @@ const TrafficLightBar = ({
 
   return (
     <div className="space-y-1">
+      <div className="text-[10px] font-medium text-[#999]">{label}</div>
       <div className="relative h-2 w-full overflow-hidden rounded-full bg-[#1C1C1E]">
         {/* Фоновые секторы светофора */}
         <div className="absolute inset-0 flex opacity-20">
@@ -260,10 +269,6 @@ const AggregateCard: React.FC<{
   // Текущий статус карточки
   const currentStatus = showDates ? dateStatus : hourStatus;
 
-  // Если один из параметров реально просрочен
-  const isAnyExpired = (hasHourLimit && hourStatus === 'expired') || (dateCalc && dateStatus === 'expired');
-  const effectiveStatus = isAnyExpired && currentStatus === 'normal' ? 'warning' : currentStatus;
-
   const statusColor =
     currentStatus === 'expired' || currentStatus === 'critical'
       ? '#FF453A'
@@ -291,9 +296,7 @@ const AggregateCard: React.FC<{
             <span>{showDates ? 'Даты' : 'Часы'}</span>
           </span>
         </button>
-        <div className="shrink-0 flex items-center justify-center p-1 rounded-full bg-[#1C1C1E]/50">
-          <StatusIcon status={effectiveStatus} />
-        </div>
+        <ResourceStatusIcons hour={hasHourLimit ? hourStatus : undefined} days={dateCalc && dateCalc.expiryDateStr !== '—' ? dateStatus : undefined} />
       </div>
 
       {/* Поля карточки: 2 поля сверху (СНЭ и Остаток), снизу 1 поле (Ресурс / Дата окончания) */}
@@ -317,7 +320,7 @@ const AggregateCard: React.FC<{
           <div className="grid grid-cols-2 gap-2">
             <Metric label="Дата выпуска" value={dateCalc?.issueDateStr || cleanStringOrDash(item.issueDate)} />
             <Metric
-              label="Остаток"
+              label="Остаток, дни"
               value={dateCalc?.remainingStr || '—'}
               color={dateCalc && dateCalc.daysRemaining < 0 ? '#FF453A' : statusColor}
             />
@@ -333,15 +336,20 @@ const AggregateCard: React.FC<{
                 : '—'
             }
           />
+          {dateCalc && dateCalc.expiryDateStr !== '—' && <Metric label="Календарный ресурс" value={`${dateCalc.totalDays} дн.`} />}
         </div>
       )}
 
       {/* Полоса светофора */}
-      {hasHourLimit && (
+      {!showDates && hasHourLimit && (
         <TrafficLightBar
           percent={percentConsumed}
           status={hourStatus}
+          label="По часам"
         />
+      )}
+      {showDates && dateCalc && dateCalc.expiryDateStr !== '—' && (
+        <TrafficLightBar percent={dateCalc.percent} status={dateStatus} label="По дням" />
       )}
     </article>
   );
@@ -383,8 +391,6 @@ const OilCard: React.FC<{ item: CloudOilResource; fuselageSne: number }> = ({ it
   const dateStatus = dateCalc ? dateCalc.status : 'normal';
 
   const currentStatus = showDates ? dateStatus : hourStatus;
-  const isAnyExpired = (hasHourLimit && hourStatus === 'expired') || (dateCalc && dateStatus === 'expired');
-  const effectiveStatus = isAnyExpired && currentStatus === 'normal' ? 'warning' : currentStatus;
 
   const statusColor =
     currentStatus === 'expired' || currentStatus === 'critical'
@@ -414,9 +420,7 @@ const OilCard: React.FC<{ item: CloudOilResource; fuselageSne: number }> = ({ it
             <span>{showDates ? 'Даты' : 'Часы'}</span>
           </span>
         </button>
-        <div className="shrink-0 flex items-center justify-center p-1 rounded-full bg-[#1C1C1E]/50">
-          <StatusIcon status={effectiveStatus} />
-        </div>
+        <ResourceStatusIcons hour={hasHourLimit ? hourStatus : undefined} days={dateCalc && dateCalc.expiryDateStr !== '—' ? dateStatus : undefined} />
       </div>
 
       {/* Поля карточки: 2 поля сверху (СНЭ наработки и Остаток), снизу 1 поле (Ресурс / Дата окончания) */}
@@ -447,7 +451,7 @@ const OilCard: React.FC<{ item: CloudOilResource; fuselageSne: number }> = ({ it
           <div className="grid grid-cols-2 gap-2">
             <Metric label="Дата заливки" value={dateCalc?.issueDateStr || cleanStringOrDash(item.byYears)} />
             <Metric
-              label="Остаток"
+              label="Остаток, дни"
               value={dateCalc?.remainingStr || '—'}
               color={dateCalc && dateCalc.daysRemaining < 0 ? '#FF453A' : statusColor}
             />
@@ -463,15 +467,20 @@ const OilCard: React.FC<{ item: CloudOilResource; fuselageSne: number }> = ({ it
                 : '—'
             }
           />
+          {dateCalc && dateCalc.expiryDateStr !== '—' && <Metric label="Календарный ресурс" value={`${dateCalc.totalDays} дн.`} />}
         </div>
       )}
 
       {/* Полоса светофора */}
-      {hasHourLimit && (
+      {!showDates && hasHourLimit && (
         <TrafficLightBar
           percent={percentConsumed}
           status={hourStatus}
+          label="По часам"
         />
+      )}
+      {showDates && dateCalc && dateCalc.expiryDateStr !== '—' && (
+        <TrafficLightBar percent={dateCalc.percent} status={dateStatus} label="По дням" />
       )}
     </article>
   );
@@ -597,6 +606,7 @@ const HourlyMaintenanceCard: React.FC<{
         <TrafficLightBar
           percent={percentHours}
           status={status}
+          label="По часам"
         />
       )}
     </article>
@@ -654,15 +664,7 @@ const CalendarMaintenanceCard: React.FC<{
         : `Плановый срок прошёл (${Math.abs(diffDays)} дн.)`;
     } else if (diffDays === 0) {
       remainingStr = 'Истекает сегодня';
-    } else if (diffDays < 100) {
-      remainingStr = `${diffDays} дн.`;
-    } else {
-      let y = expiryDate.getFullYear() - today.getFullYear();
-      let m = expiryDate.getMonth() - today.getMonth();
-      if (expiryDate.getDate() < today.getDate()) m -= 1;
-      if (m < 0) { y -= 1; m += 12; }
-      remainingStr = `${Math.max(0, y)}г. ${Math.max(0, m)}м.`;
-    }
+    } else remainingStr = `${diffDays} дн.`;
   }
 
   const statusColor =
@@ -704,7 +706,7 @@ const CalendarMaintenanceCard: React.FC<{
             value={hasLast && baseDate ? formatCustomDate(baseDate) : 'Не выполнялось'}
           />
           <Metric
-            label="Остаток"
+            label="Остаток, дни"
             value={remainingStr}
             color={statusColor}
           />
@@ -725,6 +727,7 @@ const CalendarMaintenanceCard: React.FC<{
         <TrafficLightBar
           percent={percentTime}
           status={status}
+          label="По дням"
         />
       )}
     </article>

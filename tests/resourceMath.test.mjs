@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   aggregateSne, oilRemaining, hourStatus, parseResourceDate, resourceExpiry,
-  calendarDaysBetween, resourceCalendarStatus, maintenanceStatus, addCalendarMonths,
+  calendarDaysBetween, calendarProgress, resourceCalendarStatus, maintenanceStatus, addCalendarMonths,
 } from '../src/lib/resourceMath.ts';
 
 test('aggregate SNE follows the Android installation formula even with zero installation fields', () => {
@@ -11,6 +11,16 @@ test('aggregate SNE follows the Android installation formula even with zero inst
   assert.equal(aggregateSne(6000, 1800, 300, true), 6000);
   assert.equal(hourStatus(26 * 60, 'aggregate'), 'warning');
   assert.equal(hourStatus(-1, 'aggregate'), 'expired');
+});
+
+test('calendar progress fills from start to expiry and keeps overdue days visible', () => {
+  const start = new Date(2026, 0, 1);
+  const expiry = new Date(2026, 0, 11);
+  assert.deepEqual(calendarProgress(start, expiry, new Date(2026, 0, 6)), {
+    totalDays: 10, elapsedDays: 5, remainingDays: 5, percent: 50,
+  });
+  assert.equal(calendarProgress(start, expiry, new Date(2026, 0, 12)).percent, 100);
+  assert.equal(calendarProgress(start, expiry, new Date(2026, 0, 12)).remainingDays, -1);
 });
 
 test('oil hours and dates use the Android formulas', () => {
