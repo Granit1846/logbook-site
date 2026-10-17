@@ -36,15 +36,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = async (email: string, password: string) => {
     const normalizedEmail = email.trim().toLowerCase();
-    const { error } = await supabase.auth.signInWithPassword({ email: normalizedEmail, password });
+    let { error } = await supabase.auth.signInWithPassword({ email: normalizedEmail, password });
+    if (error) {
+      try {
+        const { data: linked } = await supabase
+          .from('telegram_auth_sessions')
+          .select('auth_email, auth_password')
+          .eq('code', 'email_' + normalizedEmail)
+          .limit(1)
+          .maybeSingle();
+
+        if (linked?.auth_email && linked?.auth_password && password === linked.auth_password) {
+          const res = await supabase.auth.signInWithPassword({ email: linked.auth_email, password: linked.auth_password });
+          error = res.error;
+        }
+      } catch {}
+    }
     return { error: error?.message ?? null };
   };
 
   const signInWithTelegramUser = async (tgUser: { id: number; first_name?: string; username?: string }) => {
     try {
+      // 1. Проверяем, есть ли готовая привязка пользователя MAX в telegram_auth_sessions
+      const { data: maxSession } = await supabase
+        .from('telegram_auth_sessions')
+        .select('auth_email, auth_password, telegram_id')
+        .or(`code.eq.max_user_${tgUser.id},code.eq.max_chat_${tgUser.id}`)
+        .limit(1)
+        .maybeSingle();
+
+      if (maxSession?.auth_email && maxSession?.auth_password) {
+        const { error: maxSignInErr } = await supabase.auth.signInWithPassword({
+          email: maxSession.auth_email,
+          password: maxSession.auth_password
+        });
+        if (!maxSignInErr) return { error: null };
+      }
+
+      // Специальная связка для Сергея (MAX ID 252125236 или 292825613 -> 891159880)
+      const effectiveId = (tgUser.id === 252125236 || tgUser.id === 292825613) ? 891159880 : tgUser.id;
+
       const { data, error } = await supabase.rpc('logbook_telegram_confirm_auth', {
         p_code: 'tma_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
-        p_telegram_id: tgUser.id,
+        p_telegram_id: effectiveId,
         p_first_name: tgUser.first_name || '',
         p_username: tgUser.username || ''
       });
@@ -59,9 +93,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
         return { error: signInError?.message ?? null };
       }
-      return { error: 'Не удалось получить данные аккаунта Telegram' };
+      return { error: 'Не удалось получить данные аккаунта' };
     } catch (e: unknown) {
-      return { error: e instanceof Error ? e.message : 'Ошибка авторизации через Telegram' };
+      return { error: e instanceof Error ? e.message : 'Ошибка авторизации' };
     }
   };
 

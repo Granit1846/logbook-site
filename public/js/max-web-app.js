@@ -92,8 +92,13 @@ var e = class {
 		try {
 			let t = this.getHashParam(location.hash, e);
 			if (t) return t;
+			let s = new URLSearchParams(location.search).get(e);
+			if (s) return s;
 			let n = performance.getEntriesByType("navigation")[0], r = n && new URL(n.name).hash;
-			return r && this.getHashParam(r, e) || null;
+			let p = r && this.getHashParam(r, e) || null;
+			if (p) return p;
+			let q = n && new URL(n.name).search;
+			return q && new URLSearchParams(q).get(e) || null;
 		} catch (t) {
 			return console.warn(`Ошибка при извлечении параметра ${e}:`, t), null;
 		}
@@ -101,6 +106,11 @@ var e = class {
 	getHashParam(e, t) {
 		try {
 			let n = e.replace(/^#/, "");
+			if (n.includes('?')) {
+				const afterQ = n.substring(n.indexOf('?') + 1);
+				const val = new URLSearchParams(afterQ).get(t);
+				if (val) return val;
+			}
 			return new URLSearchParams(n).get(t);
 		} catch (e) {
 			return console.warn(`Ошибка при извлечении параметра ${t}:`, e), null;

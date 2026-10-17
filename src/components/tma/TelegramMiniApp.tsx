@@ -66,17 +66,41 @@ export const TelegramMiniApp: React.FC = () => {
   useEffect(() => { void loadCloudProfiles(); }, [loadCloudProfiles]);
 
   useEffect(() => {
-    // 1. Проверяем платформенного пользователя (Telegram WebApp или MAX Bridge)
-    const platformUser = getAppPlatformUser();
-    if (platformUser && !user && !authLoading && !authBusy) {
-      setAuthBusy(true);
-      signInWithTelegramUser(platformUser)
-        .then((res) => {
-          if (res.error) setAuthError(res.error);
-        })
-        .finally(() => setAuthBusy(false));
-      return;
+    let canceled = false;
+    let attempts = 0;
+
+    const checkPlatformUser = () => {
+      if (canceled || user || authLoading || authBusy) return true;
+      const platformUser = getAppPlatformUser();
+      if (platformUser) {
+        setAuthBusy(true);
+        signInWithTelegramUser(platformUser)
+          .then((res) => {
+            if (res.error && !canceled) setAuthError(res.error);
+          })
+          .finally(() => {
+            if (!canceled) setAuthBusy(false);
+          });
+        return true;
+      }
+      return false;
+    };
+
+    if (!checkPlatformUser()) {
+      const timer = setInterval(() => {
+        attempts++;
+        if (checkPlatformUser() || attempts >= 12) {
+          clearInterval(timer);
+        }
+      }, 300);
+      return () => {
+        canceled = true;
+        clearInterval(timer);
+      };
     }
+  }, [user, authLoading, authBusy, signInWithTelegramUser]);
+
+  useEffect(() => {
 
     // 2. Проверяем параметры автологина из URL (например, при открытии по прямой ссылке с токеном)
     if (!user && !authLoading && !authBusy && typeof window !== 'undefined') {
