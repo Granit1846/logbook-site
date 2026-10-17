@@ -16,23 +16,23 @@ export interface ReleaseManifest {
 
 const localCurrent: Record<'windows' | 'android', ReleaseManifest> = {
   windows: {
-    version: '1.1.13',
-    url: '/downloads/Logbook_Setup_1.1.13.exe',
-    directUrl: '/downloads/Logbook_Setup_1.1.13.exe',
+    version: '1.1.14',
+    url: '/downloads/LogBook-PC.zip',
+    directUrl: '/downloads/LogBook-PC.zip',
     zipUrl: '/downloads/LogBook-PC.zip',
     githubUrl: 'https://github.com/Granit1846/LogBook-PC/releases',
-    notes: 'Официальный установщик для Windows 10/11 (64 бит). Печать формуляров и журналов ТО, Wi-Fi синхронизация по QR-коду, Supabase Cloud, тема Nexus.',
-    sizeBytes: 73965220,
-    builtAt: '2026-10-13T20:18:19.000Z',
+    notes: 'Версия для Windows 10/11 (64 бит). Поддержка авторизации и связки аккаунтов через мессенджер MAX, беспарольный вход по коду, печать формуляров и журналов ТО, Wi-Fi и облачная синхронизация.',
+    sizeBytes: 73342263,
+    builtAt: '2026-10-18T01:06:50.000Z',
   },
   android: {
-    version: '1.1.28',
+    version: '1.1.29',
     url: '/downloads/LogBook.apk',
     directUrl: '/downloads/LogBook.apk',
     githubUrl: 'https://github.com/Granit1846/LogBook-Android/releases',
-    notes: 'Мобильный LogBook для Android 7.0+. Полноценные формуляры вертолета (ВК-2500, ВР-80, ТА-14), журнал ТО, Wi-Fi сканер QR-кодов, авторизация через Telegram.',
-    sizeBytes: 22196370,
-    builtAt: '2026-10-14T00:01:40.000Z',
+    notes: 'Мобильный LogBook для Android 7.0+. Полноценные формуляры вертолета (ВК-2500, ВР-80, ТА-14), журнал ТО, Wi-Fi сканер QR-кодов, авторизация и связка профилей через MAX и Telegram.',
+    sizeBytes: 22130834,
+    builtAt: '2026-10-18T01:05:57.000Z',
   },
 };
 
