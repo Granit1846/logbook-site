@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plane, Menu, X, Download } from 'lucide-react';
+import { Plane, Menu, X, Download, Send, Github } from 'lucide-react';
 import ThemeToggle from './ThemeToggle';
 
 const navLinks = [
@@ -55,6 +55,28 @@ export default function Header() {
 
           {/* Right side */}
           <div className="flex items-center gap-2">
+            <a
+              href="https://t.me/my_logbook_app_bot"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold
+                bg-[#2AABEE]/10 hover:bg-[#2AABEE]/20 text-[#2AABEE] dark:bg-[#2AABEE]/20 dark:hover:bg-[#2AABEE]/30
+                border border-[#2AABEE]/30 rounded-lg transition-colors"
+              title="Открыть Telegram Mini App и бот"
+            >
+              <Send className="w-3.5 h-3.5" />
+              <span>Telegram Бот</span>
+            </a>
+            <a
+              href="https://github.com/Granit1846/LogBook-Android"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-9 h-9 rounded-lg flex items-center justify-center text-gray-600 dark:text-gray-300
+                hover:bg-gray-200 dark:hover:bg-[#2D2D2D] transition-colors"
+              title="Репозиторий на GitHub"
+            >
+              <Github className="w-4 h-4" />
+            </a>
             <ThemeToggle />
             <a
               href="#download"
@@ -92,13 +114,24 @@ export default function Header() {
               </a>
             ))}
             <a
-              href="#download"
+              href="https://t.me/my_logbook_app_bot"
+              target="_blank"
+              rel="noopener noreferrer"
               onClick={() => setMobileOpen(false)}
               className="mt-2 flex items-center justify-center gap-2 px-4 py-2 text-sm font-semibold
+                bg-[#2AABEE] text-white rounded-md"
+            >
+              <Send className="w-4 h-4" />
+              Telegram Бот & Mini App
+            </a>
+            <a
+              href="#download"
+              onClick={() => setMobileOpen(false)}
+              className="flex items-center justify-center gap-2 px-4 py-2 text-sm font-semibold
                 bg-accent text-white rounded-md"
             >
               <Download className="w-4 h-4" />
-              Скачать
+              Скачать приложения
             </a>
           </nav>
         )}

@@ -50,16 +50,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (error) {
         return { error: error.message };
       }
-      if (data && (data as any).email && (data as any).password) {
+      const authData = data as { email?: string; password?: string } | null;
+      if (authData?.email && authData?.password) {
         const { error: signInError } = await supabase.auth.signInWithPassword({
-          email: (data as any).email,
-          password: (data as any).password
+          email: authData.email,
+          password: authData.password
         });
         return { error: signInError?.message ?? null };
       }
       return { error: 'Не удалось получить данные аккаунта Telegram' };
-    } catch (e: any) {
-      return { error: e.message || 'Ошибка авторизации через Telegram' };
+    } catch (e: unknown) {
+      return { error: e instanceof Error ? e.message : 'Ошибка авторизации через Telegram' };
     }
   };
 

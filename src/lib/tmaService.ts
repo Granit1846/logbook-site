@@ -104,11 +104,93 @@ export interface BoardProfileItem {
   aircraftType: 'ka52' | 'mi8' | 'mi28' | 'plane';
 }
 
+interface ExchangeTableProfile {
+  id: string;
+  name?: string;
+  boardNumber?: string | number;
+  fuselageSne?: number;
+  resourcesJson?: string | Record<string, unknown>[];
+  [key: string]: unknown;
+}
+
+interface ExchangeTableDay {
+  id: string;
+  profileId: string;
+  date: string;
+  crew?: string;
+  isClosed?: number;
+  createdAt?: number;
+  [key: string]: unknown;
+}
+
+interface ExchangeTableLaunch {
+  id: string;
+  dayId: string;
+  order?: number;
+  vsu?: number;
+  zemlya?: number;
+  vozduh?: number;
+  tp?: number;
+  samolet?: number;
+  zapravkaLiters?: number;
+  zapravkaDensity?: number;
+  zapravkaKg?: number;
+  vedCek?: string;
+  [key: string]: unknown;
+}
+
+interface ExchangeTableSnk {
+  id: string;
+  dayId: string;
+  aLeft?: number;
+  bLeft?: number;
+  eLeft?: number;
+  gLeft?: number;
+  hLeft?: number;
+  iLeft?: number;
+  aRight?: number;
+  bRight?: number;
+  eRight?: number;
+  gRight?: number;
+  hRight?: number;
+  iRight?: number;
+  [key: string]: unknown;
+}
+
+interface ExchangeTableChast1Record {
+  profileId: string;
+  isTotal?: boolean;
+  colSNE?: number;
+  sortOrder?: number;
+  [key: string]: unknown;
+}
+
+interface ExchangeTableChast1Start {
+  profileId: string;
+  colSNE?: number;
+  [key: string]: unknown;
+}
+
+interface LogbookExchangeTables {
+  profiles: ExchangeTableProfile[];
+  days: ExchangeTableDay[];
+  launches: ExchangeTableLaunch[];
+  snk_values: ExchangeTableSnk[];
+  chast1_records?: ExchangeTableChast1Record[];
+  chast1_start?: ExchangeTableChast1Start[];
+  [key: string]: unknown;
+}
+
+interface LogbookExchangePayload {
+  format?: string;
+  version?: number;
+  tables: LogbookExchangeTables;
+}
+
 const STORAGE_KEY_PROFILES = 'logbook_tma_profiles';
 const STORAGE_KEY_ACTIVE_BOARD = 'logbook_tma_active_board';
 const STORAGE_KEY_FLIGHTS = 'logbook_tma_flights';
 const STORAGE_KEY_RESOURCES = 'logbook_tma_resources';
-const STORAGE_KEY_AUTH = 'logbook_tma_auth';
 
 export const defaultBoards: BoardProfileItem[] = [
   { id: 'b-01', name: 'Ка-52 №01 Жёлтый', boardNumber: '01', aircraftType: 'ka52' },
@@ -217,7 +299,7 @@ export const TelegramMiniAppService = {
       throw new Error('В облаке пока нет профилей борта. Сначала выполните синхронизацию в основном приложении LogBook (Android или Windows).');
     }
 
-    const exchange = typeof payloadValue === 'string' ? JSON.parse(payloadValue) : payloadValue;
+    const exchange = (typeof payloadValue === 'string' ? JSON.parse(payloadValue) : payloadValue) as LogbookExchangePayload;
     if (!exchange?.tables || typeof exchange.tables !== 'object') {
       throw new Error('Некорректный формат синхронизации в облаке');
     }
@@ -229,7 +311,7 @@ export const TelegramMiniAppService = {
 
     normalizeFlightDays(exchange.tables);
 
-    const targetProfile = exchange.tables.profiles.find((p: any) => String(p.boardNumber) === String(flight.boardNumber));
+    const targetProfile = exchange.tables.profiles.find((p) => String(p.boardNumber) === String(flight.boardNumber));
     if (!targetProfile) {
       throw new Error(`Профиль борта №${flight.boardNumber} не найден в синхронизации LogBook. Убедитесь, что борт есть в основном приложении.`);
     }
@@ -242,7 +324,7 @@ export const TelegramMiniAppService = {
 
     // Проверяем, существует ли уже запись для этого дня (по profileId и date)
     let dayRecord = exchange.tables.days.find(
-      (d: any) => String(d.profileId) === String(targetProfile.id) && String(d.date) === String(formattedDate),
+      (d) => String(d.profileId) === String(targetProfile.id) && String(d.date) === String(formattedDate),
     );
 
     let dayId: string;
@@ -265,9 +347,9 @@ export const TelegramMiniAppService = {
     }
 
     // Существующие запуски этого дня
-    const currentDayLaunches = exchange.tables.launches.filter((l: any) => String(l.dayId) === String(dayId));
+    const currentDayLaunches = exchange.tables.launches.filter((l) => String(l.dayId) === String(dayId));
     let nextOrder = currentDayLaunches.length > 0
-      ? Math.max(...currentDayLaunches.map((l: any) => Number(l.order || 0))) + 1
+      ? Math.max(...currentDayLaunches.map((l) => Number(l.order || 0))) + 1
       : 0;
 
     let addedAirMinutes = 0;
@@ -279,7 +361,7 @@ export const TelegramMiniAppService = {
       const density = Number(launch.fuelDensity || 0);
       const kg = liters > 0 && density > 0 ? Number((liters * density).toFixed(2)) : 0;
 
-      const launchRecord: Record<string, any> = {
+      const launchRecord: Record<string, unknown> = {
         id: crypto.randomUUID(),
         dayId: dayId,
         order: nextOrder,
@@ -313,7 +395,7 @@ export const TelegramMiniAppService = {
         skippedDuplicates++;
         return;
       }
-      exchange.tables.launches.push(launchRecord);
+      exchange.tables.launches.push(launchRecord as unknown as ExchangeTableLaunch);
       nextOrder++;
       addedLaunches++;
       addedAirMinutes += air;
@@ -321,7 +403,7 @@ export const TelegramMiniAppService = {
 
     // Обновляем СНК (перезаписываем или добавляем)
     if (flight.snk && Object.keys(flight.snk).length > 0) {
-      exchange.tables.snk_values = exchange.tables.snk_values.filter((s: any) => String(s.dayId) !== String(dayId));
+      exchange.tables.snk_values = exchange.tables.snk_values.filter((s) => String(s.dayId) !== String(dayId));
       exchange.tables.snk_values.push({
         id: crypto.randomUUID(),
         dayId: dayId,
@@ -344,12 +426,12 @@ export const TelegramMiniAppService = {
     let baseSne = Number(targetProfile.fuselageSne || 0);
     if (!baseSne && Array.isArray(exchange.tables.chast1_records)) {
       const pRecords = exchange.tables.chast1_records
-        .filter((r: any) => String(r.profileId) === String(targetProfile.id) && !r.isTotal && Number(r.colSNE || 0) > 0)
-        .sort((a: any, b: any) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0));
+        .filter((r) => String(r.profileId) === String(targetProfile.id) && !r.isTotal && Number(r.colSNE || 0) > 0)
+        .sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0));
       if (pRecords.length > 0) {
         baseSne = Number(pRecords[pRecords.length - 1].colSNE || 0);
       } else if (Array.isArray(exchange.tables.chast1_start)) {
-        const startRec = exchange.tables.chast1_start.find((r: any) => String(r.profileId) === String(targetProfile.id));
+        const startRec = exchange.tables.chast1_start.find((r) => String(r.profileId) === String(targetProfile.id));
         if (startRec) {
           baseSne = Number(startRec.colSNE || 0);
         }
@@ -360,7 +442,7 @@ export const TelegramMiniAppService = {
     targetProfile.fuselageSne = newFuselageSne;
 
     // Пересчитываем СНЭ и остатки агрегатов в resourcesJson
-    let resources: any[] = [];
+    let resources: Record<string, unknown>[] = [];
     if (typeof targetProfile.resourcesJson === 'string') {
       try {
         resources = JSON.parse(targetProfile.resourcesJson);
@@ -368,11 +450,11 @@ export const TelegramMiniAppService = {
         resources = [];
       }
     } else if (Array.isArray(targetProfile.resourcesJson)) {
-      resources = targetProfile.resourcesJson;
+      resources = targetProfile.resourcesJson as Record<string, unknown>[];
     }
 
     if (Array.isArray(resources) && resources.length > 0) {
-      const updatedResources = resources.map((item: any) => {
+      const updatedResources = resources.map((item) => {
         const isFuselage = item.name === 'Фюзеляж';
         const inst1 = Number(item.installedAtSne1 || 0);
         const inst2 = Number(item.installedAtSne2 || 0);

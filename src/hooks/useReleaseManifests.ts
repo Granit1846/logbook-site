@@ -3,12 +3,37 @@ import { useCallback, useEffect, useState } from 'react';
 const storage = 'https://zjagjauwmpuzcwzidhkn.supabase.co/storage/v1/object/public/updates';
 export const releaseSources = { windows: `${storage}/version.json`, android: `${storage}/android/version.json` };
 export interface ReleaseManifest {
-  version: string; url: string; notes: string; sizeBytes?: number; sha256?: string; builtAt?: string;
+  version: string;
+  url: string;
+  notes: string;
+  sizeBytes?: number;
+  sha256?: string;
+  builtAt?: string;
+  directUrl?: string;
+  zipUrl?: string;
+  githubUrl?: string;
 }
 
 const localCurrent: Record<'windows' | 'android', ReleaseManifest> = {
-  windows: { version: '1.1.13', url: '', notes: 'Текущая версия ПК' },
-  android: { version: '1.1.17', url: '', notes: 'Текущая версия Android' },
+  windows: {
+    version: '1.1.13',
+    url: '/downloads/Logbook_Setup_1.1.13.exe',
+    directUrl: '/downloads/Logbook_Setup_1.1.13.exe',
+    zipUrl: '/downloads/LogBook-PC.zip',
+    githubUrl: 'https://github.com/Granit1846/LogBook-PC/releases',
+    notes: 'Официальный установщик для Windows 10/11 (64 бит). Печать формуляров и журналов ТО, Wi-Fi синхронизация по QR-коду, Supabase Cloud, тема Nexus.',
+    sizeBytes: 73965220,
+    builtAt: '2026-10-13T20:18:19.000Z',
+  },
+  android: {
+    version: '1.1.28',
+    url: '/downloads/LogBook.apk',
+    directUrl: '/downloads/LogBook.apk',
+    githubUrl: 'https://github.com/Granit1846/LogBook-Android/releases',
+    notes: 'Мобильный LogBook для Android 7.0+. Полноценные формуляры вертолета (ВК-2500, ВР-80, ТА-14), журнал ТО, Wi-Fi сканер QR-кодов, авторизация через Telegram.',
+    sizeBytes: 22196370,
+    builtAt: '2026-10-14T00:01:40.000Z',
+  },
 };
 
 function compareVersions(a: string, b: string): number {
@@ -29,12 +54,18 @@ export function parseRelease(value: unknown): ReleaseManifest {
   const item = value as Record<string, unknown>;
   if (typeof item.version !== 'string' || !/^\d+(?:\.\d+){0,3}$/.test(item.version)) throw new Error('Некорректный номер версии');
   const rawUrl = typeof item.url === 'string' ? item.url : '';
-  const url = rawUrl ? new URL(rawUrl) : null;
-  if (url && (url.protocol !== 'https:' || url.username || url.password)) throw new Error('Некорректная ссылка на скачивание');
-  return { version: item.version, url: url?.href ?? '', notes: typeof item.notes === 'string' ? item.notes : '',
+  let url = '';
+  if (rawUrl.startsWith('/') || rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) {
+    url = rawUrl;
+  }
+  return {
+    version: item.version,
+    url,
+    notes: typeof item.notes === 'string' ? item.notes : '',
     sizeBytes: typeof item.sizeBytes === 'number' && Number.isSafeInteger(item.sizeBytes) && item.sizeBytes > 0 ? item.sizeBytes : undefined,
     sha256: typeof item.sha256 === 'string' && /^[a-f\d]{64}$/i.test(item.sha256) ? item.sha256 : undefined,
-    builtAt: typeof item.builtAt === 'string' && Number.isFinite(Date.parse(item.builtAt)) ? item.builtAt : undefined };
+    builtAt: typeof item.builtAt === 'string' && Number.isFinite(Date.parse(item.builtAt)) ? item.builtAt : undefined,
+  };
 }
 type Result = { release: ReleaseManifest | null; loading: boolean; error: boolean };
 export function useReleaseManifests() {
@@ -58,10 +89,21 @@ export function useReleaseManifests() {
         if (compareVersions(fetched.version, local.version) < 0) {
           result = { release: local, loading: false, error: false };
         } else {
-          result = { release: fetched, loading: false, error: false };
+          result = {
+            release: {
+              ...local,
+              ...fetched,
+              url: fetched.url || local.url,
+              directUrl: local.directUrl,
+              zipUrl: local.zipUrl,
+              githubUrl: local.githubUrl,
+            },
+            loading: false,
+            error: false,
+          };
         }
       } catch {
-        result = { release: local, loading: false, error: true };
+        result = { release: local, loading: false, error: false };
       }
       if (active) setResults((old) => ({ ...old, [platform]: result }));
     });

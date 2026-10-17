@@ -1,10 +1,11 @@
 import { motion } from 'framer-motion';
-import { Download, BookOpen, Monitor, Smartphone, Wifi, WifiOff } from 'lucide-react';
+import { Download, BookOpen, Monitor, Smartphone, Wifi, WifiOff, Send } from 'lucide-react';
 
 const badges = [
   { icon: Monitor, label: 'Windows 10/11' },
   { icon: Smartphone, label: 'Android' },
-  { icon: WifiOff, label: 'Офлайн' },
+  { icon: Send, label: 'Telegram Mini App' },
+  { icon: WifiOff, label: '100% Офлайн' },
 ];
 
 export default function Hero() {
@@ -33,7 +34,7 @@ export default function Hero() {
                   key={badge.label}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium
                     bg-white dark:bg-[#2D2D2D] text-accent-700 dark:text-accent-300
-                    rounded-full border border-gray-200 dark:border-gray-700"
+                    rounded-full border border-gray-200 dark:border-gray-700 shadow-2xs"
                 >
                   <badge.icon className="w-3.5 h-3.5" />
                   {badge.label}
@@ -46,27 +47,38 @@ export default function Hero() {
             </h1>
 
             <p className="text-lg text-gray-600 dark:text-gray-400 mb-8 max-w-xl leading-relaxed">
-              Программа для ведения формуляров, расчёта ресурсов и анализа
-              наработки на ПК и Android. Работает офлайн, хранит данные локально.
-              Обмен между устройствами — через интернет или по Wi-Fi с QR-кодом.
+              Профессиональная система для ведения формуляров, расчёта ресурсов и анализа
+              наработки на ПК, Android и в Telegram. Полная автономность, локальное хранение
+              и защищённая синхронизация по Wi-Fi или через защищённое облако.
             </p>
 
-            <div className="flex flex-wrap gap-4">
+            <div className="flex flex-wrap gap-3.5">
               <a
                 href="#download"
-                className="flex items-center gap-2 px-6 py-3 text-base font-semibold
-                  bg-accent text-white rounded-md hover:bg-accent-600
-                  transition-colors duration-200 shadow-md hover:shadow-lg"
+                className="flex items-center gap-2 px-6 py-3.5 text-base font-semibold
+                  bg-accent text-white rounded-xl hover:bg-accent-600
+                  transition-all duration-200 shadow-md hover:shadow-lg"
               >
                 <Download className="w-5 h-5" />
-                Windows и Android
+                Скачать для Windows и Android
+              </a>
+              <a
+                href="https://t.me/my_logbook_app_bot"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 px-5 py-3.5 text-base font-semibold
+                  bg-[#2AABEE] text-white rounded-xl hover:bg-[#229ED9]
+                  transition-all duration-200 shadow-md hover:shadow-lg"
+              >
+                <Send className="w-5 h-5" />
+                Запустить в Telegram
               </a>
               <a
                 href="#docs"
-                className="flex items-center gap-2 px-6 py-3 text-base font-semibold
+                className="flex items-center gap-2 px-5 py-3.5 text-base font-semibold
                   bg-white dark:bg-[#2D2D2D] text-accent-700 dark:text-accent-300
-                  border-2 border-accent rounded-md hover:bg-accent-50 dark:hover:bg-accent-800
-                  transition-colors duration-200"
+                  border-2 border-accent/40 hover:border-accent rounded-xl hover:bg-accent-50 dark:hover:bg-accent-950/30
+                  transition-all duration-200"
               >
                 <BookOpen className="w-5 h-5" />
                 Документация

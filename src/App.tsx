@@ -13,7 +13,6 @@ import FAQ from '@/components/FAQ';
 import Footer from '@/components/Footer';
 import AdminPanel from '@/components/AdminPanel';
 import TelegramMiniApp from '@/components/tma/TelegramMiniApp';
-import { isRunningInTelegram } from '@/lib/telegram';
 
 function App() {
   const content = useSiteContent();
@@ -31,13 +30,13 @@ function App() {
       pathname.includes('/tg');
 
     // Проверяем Telegram WebApp окружение
-    const tg = (window as any).Telegram?.WebApp;
+    const tg = window.Telegram?.WebApp;
     const isTgBrowser = 
       /Telegram/i.test(navigator.userAgent) || 
       Boolean(tg?.initData) ||
       Boolean(tg?.initDataUnsafe?.user) ||
-      Boolean((window as any).TelegramWebviewProxy) ||
-      (Boolean(tg?.platform) && tg.platform !== 'unknown');
+      Boolean(window.TelegramWebviewProxy) ||
+      Boolean(tg?.platform && tg.platform !== 'unknown');
 
     return hasTgInUrl || isTgBrowser;
   });
@@ -46,14 +45,14 @@ function App() {
     const checkTg = () => {
       const hash = window.location.hash.toLowerCase();
       const search = window.location.search.toLowerCase();
-      const tg = (window as any).Telegram?.WebApp;
+      const tg = window.Telegram?.WebApp;
       if (
         hash.includes('tg') ||
         search.includes('tg') ||
         Boolean(tg?.initData) ||
         Boolean(tg?.initDataUnsafe?.user) ||
-        (Boolean(tg?.platform) && tg.platform !== 'unknown') ||
-        Boolean((window as any).TelegramWebviewProxy)
+        Boolean(tg?.platform && tg.platform !== 'unknown') ||
+        Boolean(window.TelegramWebviewProxy)
       ) {
         setIsTmaMode(true);
       }

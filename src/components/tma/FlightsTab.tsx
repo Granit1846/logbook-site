@@ -121,7 +121,7 @@ export const FlightsTab: React.FC<FlightsTabProps> = ({ activeBoard }) => {
 
       setLaunches([createLaunch(Date.now().toString())]);
       setSnk({});
-    } catch (err: any) {
+    } catch (err) {
       triggerHapticNotification('error');
       const errText = err instanceof Error ? err.message : 'Ошибка отправки данных';
       setStatusMessage({ text: errText, type: 'error' });

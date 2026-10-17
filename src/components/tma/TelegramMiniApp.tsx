@@ -60,7 +60,7 @@ export const TelegramMiniApp: React.FC = () => {
         })
         .finally(() => setAuthBusy(false));
     }
-  }, [user, authLoading, signInWithTelegramUser]);
+  }, [user, authLoading, signInWithTelegramUser, authBusy]);
 
   useEffect(() => {
     const tg = getTelegramWebApp();
@@ -68,9 +68,11 @@ export const TelegramMiniApp: React.FC = () => {
       tg.ready();
       tg.expand();
       try {
-        (tg as any).setHeaderColor?.('#1C1C1E');
-        (tg as any).setBackgroundColor?.('#1C1C1E');
-      } catch {}
+        tg.setHeaderColor?.('#1C1C1E');
+        tg.setBackgroundColor?.('#1C1C1E');
+      } catch {
+        // ignore if not supported by the client
+      }
     }
   }, []);
 
@@ -203,8 +205,9 @@ export const TelegramMiniApp: React.FC = () => {
                           triggerHaptic('heavy');
                           alert(`Облачные дни успешно очищены (ревизия ${res.revision})! Теперь синхронизация в приложении пройдет чисто.`);
                           void loadCloudProfiles();
-                        } catch (e: any) {
-                          alert(`Ошибка очистки: ${e.message}`);
+                        } catch (e: unknown) {
+                          const msg = e instanceof Error ? e.message : String(e);
+                          alert(`Ошибка очистки: ${msg}`);
                         } finally {
                           setCloudLoading(false);
                         }

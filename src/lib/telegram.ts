@@ -37,6 +37,8 @@ declare global {
         expand: () => void;
         close: () => void;
         ready: () => void;
+        setHeaderColor?: (color: string) => void;
+        setBackgroundColor?: (color: string) => void;
         MainButton: {
           text: string;
           color: string;
@@ -70,6 +72,7 @@ declare global {
         showConfirm: (message: string, callback?: (confirmed: boolean) => void) => void;
       };
     };
+    TelegramWebviewProxy?: unknown;
   }
 }
 
