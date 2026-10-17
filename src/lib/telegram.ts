@@ -73,6 +73,30 @@ declare global {
       };
     };
     TelegramWebviewProxy?: unknown;
+    WebApp?: {
+      initData?: string;
+      initDataUnsafe?: {
+        user?: TelegramUser;
+        query_id?: string;
+        auth_date?: number;
+        hash?: string;
+        start_param?: string;
+      };
+      platform?: string;
+      version?: string;
+      ready?: () => void;
+      expand?: () => void;
+      close?: () => void;
+      setHeaderColor?: (color: string) => void;
+      setBackgroundColor?: (color: string) => void;
+      BackButton?: {
+        isVisible: boolean;
+        onClick: (cb: () => void) => void;
+        offClick: (cb: () => void) => void;
+        show: () => void;
+        hide: () => void;
+      };
+    };
   }
 }
 
@@ -83,10 +107,32 @@ export function getTelegramWebApp() {
   return null;
 }
 
+export function getMaxWebApp() {
+  if (typeof window !== 'undefined' && window.WebApp) {
+    return window.WebApp;
+  }
+  return null;
+}
+
 export function isRunningInTelegram(): boolean {
   if (typeof window === 'undefined') return false;
   const tg = window.Telegram?.WebApp;
   return Boolean(tg && (tg.initData || tg.platform !== 'unknown'));
+}
+
+export function isRunningInMax(): boolean {
+  if (typeof window === 'undefined') return false;
+  const max = window.WebApp;
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+  return Boolean(max && (max.initData || max.initDataUnsafe?.user || max.platform)) || /MAX/i.test(ua);
+}
+
+export function getAppPlatformUser(): TelegramUser | null {
+  const tgUser = getTelegramWebApp()?.initDataUnsafe?.user;
+  if (tgUser && tgUser.id) return tgUser;
+  const maxUser = getMaxWebApp()?.initDataUnsafe?.user;
+  if (maxUser && maxUser.id) return maxUser;
+  return null;
 }
 
 export function triggerHaptic(style: 'light' | 'medium' | 'heavy' = 'light') {
@@ -110,3 +156,4 @@ export function triggerHapticNotification(type: 'success' | 'warning' | 'error')
     }
   }
 }
+

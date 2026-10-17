@@ -4,7 +4,7 @@ import { FlightsTab } from './FlightsTab';
 import { ResourcesTab } from './ResourcesTab';
 import { useAuth } from '@/contexts/AuthContext';
 import { TelegramMiniAppService, type CloudProfileData } from '@/lib/tmaService';
-import { getTelegramWebApp, isRunningInTelegram, triggerHaptic } from '@/lib/telegram';
+import { getTelegramWebApp, getMaxWebApp, getAppPlatformUser, isRunningInTelegram, isRunningInMax, triggerHaptic } from '@/lib/telegram';
 
 export const TelegramMiniApp: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'flights' | 'resources'>('flights');
@@ -34,6 +34,7 @@ export const TelegramMiniApp: React.FC = () => {
   const [authError, setAuthError] = useState('');
   const { user, loading: authLoading, signIn, signInWithTelegramUser, signInWithPilotId, signOut } = useAuth();
   const inTelegram = isRunningInTelegram();
+  const inMax = isRunningInMax();
   const localProfiles = useMemo(() => TelegramMiniAppService.getBoards(), []);
 
   const loadCloudProfiles = useCallback(async () => {
@@ -65,11 +66,11 @@ export const TelegramMiniApp: React.FC = () => {
   useEffect(() => { void loadCloudProfiles(); }, [loadCloudProfiles]);
 
   useEffect(() => {
-    const tg = getTelegramWebApp();
-    const tgUser = tg?.initDataUnsafe?.user;
-    if (tgUser && !user && !authLoading && !authBusy) {
+    // 1. Проверяем платформенного пользователя (Telegram WebApp или MAX Bridge)
+    const platformUser = getAppPlatformUser();
+    if (platformUser && !user && !authLoading && !authBusy) {
       setAuthBusy(true);
-      signInWithTelegramUser(tgUser)
+      signInWithTelegramUser(platformUser)
         .then((res) => {
           if (res.error) setAuthError(res.error);
         })
@@ -77,7 +78,7 @@ export const TelegramMiniApp: React.FC = () => {
       return;
     }
 
-    // Проверяем параметры автологина из URL (например, при открытии из MAX)
+    // 2. Проверяем параметры автологина из URL (например, при открытии по прямой ссылке с токеном)
     if (!user && !authLoading && !authBusy && typeof window !== 'undefined') {
       try {
         const fullUrl = window.location.href;
@@ -133,6 +134,7 @@ export const TelegramMiniApp: React.FC = () => {
   }, [user, authLoading, signInWithTelegramUser, signIn, authBusy]);
 
   useEffect(() => {
+    // 1. Telegram WebApp инициализация
     const tg = getTelegramWebApp();
     if (tg) {
       tg.ready();
@@ -141,10 +143,24 @@ export const TelegramMiniApp: React.FC = () => {
         tg.setHeaderColor?.('#1C1C1E');
         tg.setBackgroundColor?.('#1C1C1E');
       } catch {
-        // ignore if not supported by the client
+        // ignore
+      }
+    }
+
+    // 2. MAX Bridge инициализация (сигнал ready для мобильного клиента MAX)
+    const max = getMaxWebApp();
+    if (max) {
+      try {
+        max.ready?.();
+        max.expand?.();
+        max.setHeaderColor?.('#1C1C1E');
+        max.setBackgroundColor?.('#1C1C1E');
+      } catch {
+        // ignore
       }
     }
   }, []);
+
 
   const profileOptions = user
     ? cloudProfiles.map((profile) => ({ id: profile.id, name: profile.name, boardNumber: profile.boardNumber }))

@@ -13,6 +13,7 @@ import FAQ from '@/components/FAQ';
 import Footer from '@/components/Footer';
 import AdminPanel from '@/components/AdminPanel';
 import TelegramMiniApp from '@/components/tma/TelegramMiniApp';
+import { isRunningInMax, isRunningInTelegram } from '@/lib/telegram';
 
 function App() {
   const content = useSiteContent();
@@ -36,37 +37,31 @@ function App() {
       pathname.includes('/tg');
 
     // Проверяем Telegram WebApp окружение
-    const tg = window.Telegram?.WebApp;
-    const isTgBrowser = 
-      /Telegram/i.test(navigator.userAgent) || 
-      Boolean(tg?.initData) ||
-      Boolean(tg?.initDataUnsafe?.user) ||
-      Boolean(window.TelegramWebviewProxy) ||
-      Boolean(tg?.platform && tg.platform !== 'unknown');
+    const isTg = isRunningInTelegram() || /Telegram/i.test(navigator.userAgent);
 
-    return hasMiniAppInUrl || isTgBrowser;
+    // Проверяем MAX WebApp окружение
+    const isMax = isRunningInMax();
+
+    return hasMiniAppInUrl || isTg || isMax;
   });
 
   useEffect(() => {
     const checkMiniApp = () => {
       const hash = window.location.hash.toLowerCase();
       const search = window.location.search.toLowerCase();
-      const tg = window.Telegram?.WebApp;
-      if (
+      const hasMiniAppInUrl = 
         hash.includes('app') ||
         hash.includes('max') ||
-        hash.includes('tg') ||
+        hash.includes('tg') || 
         search.includes('app') ||
         search.includes('max') ||
-        search.includes('tg') ||
-        Boolean(tg?.initData) ||
-        Boolean(tg?.initDataUnsafe?.user) ||
-        Boolean(tg?.platform && tg.platform !== 'unknown') ||
-        Boolean(window.TelegramWebviewProxy)
-      ) {
+        search.includes('tg');
+
+      if (hasMiniAppInUrl || isRunningInTelegram() || isRunningInMax()) {
         setIsTmaMode(true);
       }
     };
+
 
     checkMiniApp();
     const timer = setTimeout(checkMiniApp, 200);
