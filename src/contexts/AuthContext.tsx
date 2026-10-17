@@ -11,6 +11,7 @@ interface AuthContextValue {
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signInWithTelegramUser: (tgUser: { id: number; first_name?: string; username?: string }) => Promise<{ error: string | null }>;
+  signInWithPilotId: (pilotId: number | string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
 }
 
@@ -64,13 +65,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const signInWithPilotId = async (rawId: number | string) => {
+    const id = typeof rawId === 'string' ? parseInt(rawId.replace(/\D/g, ''), 10) : rawId;
+    if (!id || isNaN(id)) {
+      return { error: 'Укажите корректный ID пилота (например, 891159880)' };
+    }
+    return signInWithTelegramUser({ id, first_name: 'Пилот' });
+  };
+
   const signOut = async () => {
     await supabase.auth.signOut();
   };
 
   return (
     <AuthContext.Provider
-      value={{ session, user: session?.user ?? null, isAdmin: session?.user?.email === ADMIN_EMAIL, loading, signIn, signInWithTelegramUser, signOut }}
+      value={{ session, user: session?.user ?? null, isAdmin: session?.user?.email === ADMIN_EMAIL, loading, signIn, signInWithTelegramUser, signInWithPilotId, signOut }}
     >
       {children}
     </AuthContext.Provider>
