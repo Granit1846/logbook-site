@@ -231,6 +231,20 @@ export const TelegramMiniAppService = {
 
   setActiveBoard(boardNumber: string) {
     localStorage.setItem(STORAGE_KEY_ACTIVE_BOARD, boardNumber);
+    void this.saveActiveBoardToCloud(boardNumber);
+  },
+
+  async saveActiveBoardToCloud(boardNumber: string) {
+    try {
+      if (!supabase) return;
+      await supabase.auth.updateUser({
+        data: {
+          selected_board: boardNumber
+        }
+      });
+    } catch {
+      // silently ignore if not authenticated yet
+    }
   },
 
   getFlights(boardNumber?: string): FlightEntryDraft[] {

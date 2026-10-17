@@ -34,7 +34,8 @@ export const TelegramMiniApp: React.FC = () => {
       const profiles = await TelegramMiniAppService.getCloudProfiles();
       setCloudProfiles(profiles);
       if (profiles.length > 0) {
-        const saved = TelegramMiniAppService.getActiveBoard();
+        const cloudMetaBoard = (user?.user_metadata as Record<string, unknown> | undefined)?.selected_board as string | undefined;
+        const saved = cloudMetaBoard || TelegramMiniAppService.getActiveBoard();
         const board = profiles.some((profile) => profile.boardNumber === saved) ? saved : profiles[0].boardNumber;
         TelegramMiniAppService.setActiveBoard(board);
         setSelectedBoard(board);
