@@ -60,8 +60,55 @@ export const TelegramMiniApp: React.FC = () => {
           if (res.error) setAuthError(res.error);
         })
         .finally(() => setAuthBusy(false));
+      return;
     }
-  }, [user, authLoading, signInWithTelegramUser, authBusy]);
+
+    // Проверяем параметры автологина из URL (например, при открытии из MAX)
+    if (!user && !authLoading && !authBusy && typeof window !== 'undefined') {
+      try {
+        const fullUrl = window.location.href;
+        let authParam = '';
+
+        const urlParams = new URLSearchParams(window.location.search);
+        authParam = urlParams.get('auth') || '';
+
+        const hashIdx = fullUrl.indexOf('#');
+        if (!authParam && hashIdx !== -1) {
+          const hashPart = fullUrl.substring(hashIdx);
+          const hashQ = hashPart.indexOf('?');
+          if (hashQ !== -1) {
+            const hashParams = new URLSearchParams(hashPart.substring(hashQ));
+            authParam = hashParams.get('auth') || '';
+          }
+        }
+
+        if (authParam) {
+          setAuthBusy(true);
+          const base64 = authParam.replace(/-/g, '+').replace(/_/g, '/');
+          const decoded = decodeURIComponent(escape(atob(base64)));
+          const parsed = JSON.parse(decoded);
+          if (parsed.e && parsed.p) {
+            signIn(parsed.e, parsed.p)
+              .then((res) => {
+                if (res.error) {
+                  setAuthError(res.error);
+                } else {
+                  // Очищаем токен из адресной строки
+                  const cleanHash = (window.location.hash || '').split('?')[0] || '#app';
+                  window.history.replaceState(null, '', window.location.pathname + cleanHash);
+                }
+              })
+              .finally(() => setAuthBusy(false));
+          } else {
+            setAuthBusy(false);
+          }
+        }
+      } catch (err) {
+        console.warn('Auto-login error:', err);
+        setAuthBusy(false);
+      }
+    }
+  }, [user, authLoading, signInWithTelegramUser, signIn, authBusy]);
 
   useEffect(() => {
     const tg = getTelegramWebApp();

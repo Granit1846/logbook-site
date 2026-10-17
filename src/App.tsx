@@ -22,11 +22,17 @@ function App() {
     const search = window.location.search.toLowerCase();
     const pathname = window.location.pathname.toLowerCase();
     
-    // Проверяем Telegram параметры в URL (включая #tgWebAppData от Telegram)
-    const hasTgInUrl = 
+    // Проверяем параметры в URL для перехода в режим приложения (Telegram, MAX или веб-приложение)
+    const hasMiniAppInUrl = 
+      hash.includes('app') ||
+      hash.includes('max') ||
       hash.includes('tg') || 
+      search.includes('app') ||
+      search.includes('max') ||
       search.includes('tg') || 
       search.includes('telegram') ||
+      pathname.includes('/app') ||
+      pathname.includes('/max') ||
       pathname.includes('/tg');
 
     // Проверяем Telegram WebApp окружение
@@ -38,16 +44,20 @@ function App() {
       Boolean(window.TelegramWebviewProxy) ||
       Boolean(tg?.platform && tg.platform !== 'unknown');
 
-    return hasTgInUrl || isTgBrowser;
+    return hasMiniAppInUrl || isTgBrowser;
   });
 
   useEffect(() => {
-    const checkTg = () => {
+    const checkMiniApp = () => {
       const hash = window.location.hash.toLowerCase();
       const search = window.location.search.toLowerCase();
       const tg = window.Telegram?.WebApp;
       if (
+        hash.includes('app') ||
+        hash.includes('max') ||
         hash.includes('tg') ||
+        search.includes('app') ||
+        search.includes('max') ||
         search.includes('tg') ||
         Boolean(tg?.initData) ||
         Boolean(tg?.initDataUnsafe?.user) ||
@@ -58,11 +68,12 @@ function App() {
       }
     };
 
-    checkTg();
-    const timer = setTimeout(checkTg, 200);
+    checkMiniApp();
+    const timer = setTimeout(checkMiniApp, 200);
 
     const handleHash = () => {
-      if (window.location.hash.toLowerCase().includes('tg')) {
+      const h = window.location.hash.toLowerCase();
+      if (h.includes('app') || h.includes('max') || h.includes('tg')) {
         setIsTmaMode(true);
       }
     };
