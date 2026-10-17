@@ -16,7 +16,20 @@ export const TelegramMiniApp: React.FC = () => {
   const [cloudError, setCloudError] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [pilotIdInput, setPilotIdInput] = useState('891159880');
+  const [lastPilotId, setLastPilotId] = useState(() => {
+    try {
+      return localStorage.getItem('logbook_last_pilot_id') || '';
+    } catch {
+      return '';
+    }
+  });
+  const [pilotIdInput, setPilotIdInput] = useState(() => {
+    try {
+      return localStorage.getItem('logbook_last_pilot_id') || '';
+    } catch {
+      return '';
+    }
+  });
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState('');
   const { user, loading: authLoading, signIn, signInWithTelegramUser, signInWithPilotId, signOut } = useAuth();
@@ -89,6 +102,14 @@ export const TelegramMiniApp: React.FC = () => {
           const decoded = decodeURIComponent(escape(atob(base64)));
           const parsed = JSON.parse(decoded);
           if (parsed.e && parsed.p) {
+            const idMatch = String(parsed.e).match(/^tg_(\d+)@telegram\.logbook$/);
+            if (idMatch) {
+              try {
+                localStorage.setItem('logbook_last_pilot_id', idMatch[1]);
+                setLastPilotId(idMatch[1]);
+                setPilotIdInput(idMatch[1]);
+              } catch {}
+            }
             signIn(parsed.e, parsed.p)
               .then((res) => {
                 if (res.error) {
@@ -181,23 +202,42 @@ export const TelegramMiniApp: React.FC = () => {
             type="button"
             onClick={async () => {
               triggerHaptic('light');
-              setAuthBusy(true);
-              setAuthError('');
               const tgUser = getTelegramWebApp()?.initDataUnsafe?.user;
-              const res = tgUser
-                ? await signInWithTelegramUser(tgUser)
-                : await signInWithPilotId('891159880');
-              setAuthBusy(false);
-              if (res.error) {
+              if (lastPilotId) {
+                setAuthBusy(true);
+                setAuthError('');
+                const res = await signInWithPilotId(lastPilotId);
+                setAuthBusy(false);
+                if (res.error) {
+                  setSettingsOpen(true);
+                  setAuthError(res.error);
+                }
+              } else if (tgUser) {
+                setAuthBusy(true);
+                setAuthError('');
+                const res = await signInWithTelegramUser(tgUser);
+                setAuthBusy(false);
+                if (res.error) {
+                  setSettingsOpen(true);
+                  setAuthError(res.error);
+                }
+              } else {
                 setSettingsOpen(true);
-                setAuthError(res.error);
               }
             }}
             disabled={authBusy}
             className="mt-2.5 flex w-full items-center justify-between rounded-lg border border-[#FFD60A]/30 bg-[#FFD60A]/10 px-3 py-2 text-left text-[11px] text-[#FFD60A] transition-colors hover:bg-[#FFD60A]/20 disabled:opacity-50"
           >
-            <span>{authBusy ? 'Выполняется вход в профиль…' : 'Войти в профиль пилота (891159880)'}</span>
-            <span className="font-semibold underline">{authBusy ? '⏳' : 'Войти в 1 клик ➔'}</span>
+            <span>
+              {authBusy
+                ? 'Выполняется вход в профиль…'
+                : lastPilotId
+                ? `Войти в профиль пилота (${lastPilotId})`
+                : 'Войти в профиль пилота (по ID)'}
+            </span>
+            <span className="font-semibold underline">
+              {authBusy ? '⏳' : lastPilotId ? 'Войти в 1 клик ➔' : 'Ввести ID ➔'}
+            </span>
           </button>
         )}
       </div>
@@ -276,27 +316,33 @@ export const TelegramMiniApp: React.FC = () => {
                       <p className="text-[11px] text-[#AAA]">
                         Мгновенный вход в ваш аккаунт со всеми бортами и налётами:
                       </p>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          triggerHaptic('light');
-                          setAuthBusy(true);
-                          setAuthError('');
-                          const res = await signInWithPilotId('891159880');
-                          setAuthBusy(false);
-                          if (res.error) setAuthError(res.error);
-                        }}
-                        disabled={authBusy}
-                        className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#229ED9] font-semibold text-white shadow transition-all active:scale-[0.98] disabled:opacity-50"
-                      >
-                        {authBusy ? 'Вход…' : 'Войти в профиль (891159880) ➔'}
-                      </button>
+                      {lastPilotId && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            triggerHaptic('light');
+                            setAuthBusy(true);
+                            setAuthError('');
+                            const res = await signInWithPilotId(lastPilotId);
+                            setAuthBusy(false);
+                            if (res.error) {
+                              setAuthError(res.error);
+                            } else {
+                              setSettingsOpen(false);
+                            }
+                          }}
+                          disabled={authBusy}
+                          className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#229ED9] font-semibold text-white shadow transition-all active:scale-[0.98] disabled:opacity-50"
+                        >
+                          {authBusy ? 'Вход…' : `Войти в профиль (${lastPilotId}) ➔`}
+                        </button>
+                      )}
 
                       <div className="pt-1 flex gap-1.5">
                         <input
                           type="text"
                           inputMode="numeric"
-                          placeholder="ID пилота"
+                          placeholder="ID пилота (Telegram / MAX)"
                           value={pilotIdInput}
                           onChange={(e) => setPilotIdInput(e.target.value)}
                           className="h-10 flex-1 rounded-xl border border-[#3A3A3C] bg-[#2A2A2D] px-3 text-[12px] outline-none focus:border-[#229ED9]"
@@ -304,13 +350,22 @@ export const TelegramMiniApp: React.FC = () => {
                         <button
                           type="button"
                           onClick={async () => {
-                            if (!pilotIdInput.trim()) return;
+                            const trimmed = pilotIdInput.trim();
+                            if (!trimmed) return;
                             triggerHaptic('light');
                             setAuthBusy(true);
                             setAuthError('');
-                            const res = await signInWithPilotId(pilotIdInput.trim());
+                            const res = await signInWithPilotId(trimmed);
                             setAuthBusy(false);
-                            if (res.error) setAuthError(res.error);
+                            if (res.error) {
+                              setAuthError(res.error);
+                            } else {
+                              try {
+                                localStorage.setItem('logbook_last_pilot_id', trimmed);
+                                setLastPilotId(trimmed);
+                              } catch {}
+                              setSettingsOpen(false);
+                            }
                           }}
                           disabled={authBusy}
                           className="h-10 px-3 rounded-xl border border-[#3A3A3C] bg-[#2A2A2D] text-[12px] font-semibold text-[#DDD] hover:bg-white/5 disabled:opacity-50"
