@@ -76,7 +76,7 @@ export const currentFeatures: FeatureRow[] = [
 export const currentRoadmap: RoadmapRow[] = [
   {
     id: 'desktop',
-    version: 'ПК 1.1.15',
+    version: 'ПК 1.1.16',
     date_text: 'Октябрь 2026',
     title: 'Формуляры, ресурсы и вход через MAX/Telegram/Email',
     description: 'Все 5 формуляров, журнал ТО, ресурсы масел и агрегатов, аутентичная тема Nexus, авторизация и связка профилей через мессенджер MAX, Telegram и Email, установщик Inno Setup.',
@@ -85,7 +85,7 @@ export const currentRoadmap: RoadmapRow[] = [
   },
   {
     id: 'android',
-    version: 'Android 1.1.30',
+    version: 'Android 1.1.31',
     date_text: 'Октябрь 2026',
     title: 'Мобильный LogBook для Android (MAX + TG + Email)',
     description: 'Полёты, СНК, масштабирование формуляров двумя пальцами, замена агрегатов, журнал работ, авторизация через MAX, Telegram и Email, поддержка тем оформления.',

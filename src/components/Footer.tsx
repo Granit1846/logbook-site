@@ -16,8 +16,8 @@ const sections: FooterSection[] = [
   {
     title: 'Установка и загрузка',
     links: [
-      { label: 'Скачать установщик Windows (.exe)', href: '/downloads/Logbook_Setup_1.1.15.exe', download: true },
-      { label: 'Скачать Android APK (v1.1.30)', href: '/downloads/LogBook.apk', download: true },
+      { label: 'Скачать установщик Windows (.exe)', href: '/downloads/Logbook_Setup_1.1.16.exe', download: true },
+      { label: 'Скачать Android APK (v1.1.31)', href: '/downloads/LogBook.apk', download: true },
       { label: 'Раздел загрузок', href: '#download' },
     ],
   },
