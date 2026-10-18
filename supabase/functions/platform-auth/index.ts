@@ -198,7 +198,7 @@ Deno.serve(async (request) => {
   const origin = request.headers.get('origin') ?? '';
   const headers = {
     'Access-Control-Allow-Origin': allowedOrigins.has(origin) ? origin : '',
-    'Access-Control-Allow-Headers': 'authorization, apikey, content-type',
+    'Access-Control-Allow-Headers': 'authorization, apikey, content-type, x-client-info, x-supabase-api-version',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Vary': 'Origin',
     'Content-Type': 'application/json',
