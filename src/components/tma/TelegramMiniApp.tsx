@@ -38,7 +38,8 @@ export const TelegramMiniApp: React.FC = () => {
         const cloudMetaBoard = (user?.user_metadata as Record<string, unknown> | undefined)?.selected_board as string | undefined;
         const saved = cloudMetaBoard || TelegramMiniAppService.getActiveBoard();
         const board = profiles.some((profile) => profile.boardNumber === saved) ? saved : profiles[0].boardNumber;
-        TelegramMiniAppService.setActiveBoard(board);
+        // Saving to the cloud updates the user, which reloads profiles; write only a changed board to avoid a reload loop.
+        TelegramMiniAppService.setActiveBoard(board, board !== cloudMetaBoard);
         setSelectedBoard(board);
       }
     } catch (error) {

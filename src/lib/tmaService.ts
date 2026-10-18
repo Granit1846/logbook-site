@@ -229,9 +229,9 @@ export const TelegramMiniAppService = {
     return localStorage.getItem(STORAGE_KEY_ACTIVE_BOARD) || '01';
   },
 
-  setActiveBoard(boardNumber: string) {
+  setActiveBoard(boardNumber: string, saveToCloud = true) {
     localStorage.setItem(STORAGE_KEY_ACTIVE_BOARD, boardNumber);
-    void this.saveActiveBoardToCloud(boardNumber);
+    if (saveToCloud) void this.saveActiveBoardToCloud(boardNumber);
   },
 
   async saveActiveBoardToCloud(boardNumber: string) {
