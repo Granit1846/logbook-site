@@ -1,32 +1,27 @@
 # LogBook bots
 
-The Telegram and MAX bots run as separate, long-lived Node.js processes. Vercel serves the site and does not run these polling processes.
+The Telegram and MAX bots run as Supabase Edge Functions behind webhooks — no PC or server has to stay on:
 
-This folder is the only copy of the bot code. Tokens and runtime files stay outside the repository in the directory named by `LOGBOOK_BOT_DATA` (default for `run-bot.cmd`: `%USERPROFILE%\Documents\ChatGPT\LolBook.apk`):
+- `supabase/functions/telegram-bot` — Telegram posts every update here (header `X-Telegram-Bot-Api-Secret-Token`, secret `TELEGRAM_WEBHOOK_SECRET`; `max_connections: 1`, so updates arrive one at a time);
+- `supabase/functions/max-bot` — MAX posts every update to `…/max-bot?s=<MAX_WEBHOOK_SECRET>`;
+- `supabase/functions/_shared/bot_runtime.ts` — fetch-based I/O, bot tokens from Vault (`logbook_platform_bot_token`), sessions via `platform-auth`, and the `bot_state` table (subscribers, MAX link codes, calculator input, cached sessions; service role only);
+- `supabase/functions/_shared/ru_root_ca.ts` — the Russian Trusted Root CA that the MAX Bot API certificate chains to.
 
-- `.env` with `BOT_TOKEN`, `MAX_BOT_TOKEN` and `ADMIN_ID` — never commit it;
-- `subscribers.json`, `max_subscribers.json`, `max_link_requests.json` — private and persistent; both bots must share this directory for the two-step MAX ↔ Telegram link code;
-- temporary payloads, backups being sent, and `logs\bot.log` / `logs\max_bot.log`.
+Both functions are deployed with `--no-verify-jwt`; the webhook secret is the authentication. The edge functions are the source of the bot logic now; the MAX bot there also has the numeric keypad calculator.
 
-## Running
+## Switching webhooks
 
-`run-bot.cmd bot.js` or `run-bot.cmd max_bot.js` starts one bot and restarts it 5 seconds after it exits.
+A POST with the secret and `{"action":"setup"}` registers the webhook (Telegram: `setWebhook`, menu button, commands; MAX: `/subscriptions`, commands); `{"action":"teardown"}` removes it. To rotate a secret: `npx supabase secrets set TELEGRAM_WEBHOOK_SECRET=<new>` (or `MAX_WEBHOOK_SECRET`), then call `setup` with the new value.
 
-On the bot PC two Task Scheduler tasks, `LogBook Telegram bot` and `LogBook MAX bot`, start them hidden at logon:
+## Rollback to the PC bots
 
-```powershell
-$dir = "<repo>\bots"; $user = "$env:USERDOMAIN\$env:USERNAME"
-$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -StartWhenAvailable
-$principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
-$trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
-foreach ($bot in @(@('LogBook Telegram bot','bot.js'), @('LogBook MAX bot','max_bot.js'))) {
-  $action = New-ScheduledTaskAction -Execute "$env:WINDIR\System32\conhost.exe" -Argument "--headless $env:WINDIR\System32\cmd.exe /c run-bot.cmd $($bot[1])" -WorkingDirectory $dir
-  Register-ScheduledTask -TaskName $bot[0] -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force
-}
-```
+`bot.js`, `max_bot.js`, `platform_session.js` and `run-bot.cmd` in this folder are the previous long-polling versions, kept only as a fallback. Polling and a webhook cannot run together:
 
-Stop or restart them with `Stop-ScheduledTask` / `Start-ScheduledTask -TaskName 'LogBook MAX bot'`. Never run a second copy at the same time: two pollers steal each other's updates.
+1. call `teardown` on the function (or `deleteWebhook` / `DELETE /subscriptions`);
+2. enable and start the Task Scheduler task (`LogBook Telegram bot` / `LogBook MAX bot`), which runs `run-bot.cmd` with tokens and data from `LOGBOOK_BOT_DATA` (default `%USERPROFILE%\Documents\ChatGPT\LolBook.apk`, outside the repository).
+
+Subscribers and link codes live in `bot_state` now; the PC versions read the old JSON files, so copy them back from `bot_state` first if the rollback is more than temporary.
 
 ## Mini App URL
 
-`*.vercel.app` is unreachable from Russian networks, so the Mini App is served from GitHub Pages (`Granit1846/Granit1846.github.io`, rebuilt from this repository). The Telegram bot sets its menu button to `https://granit1846.github.io/#tg` on start. Set the MAX bot's Mini App URL in the MAX partner settings to `https://granit1846.github.io` (without a fragment), then use the bot's `open_app` button. The bundled Russian Trusted Root CA certificate is used only for MAX API TLS verification.
+`*.vercel.app` is unreachable from Russian networks, so the Mini App is served from GitHub Pages (`Granit1846/Granit1846.github.io`, rebuilt from this repository). The Telegram bot's menu button points to `https://granit1846.github.io/#tg`. The MAX bot's Mini App URL is set in the MAX partner settings to `https://granit1846.github.io` (without a fragment).
