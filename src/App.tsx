@@ -15,6 +15,13 @@ import AdminPanel from '@/components/AdminPanel';
 import TelegramMiniApp from '@/components/tma/TelegramMiniApp';
 import { isRunningInMax, isRunningInTelegram } from '@/lib/telegram';
 
+// Telegram and MAX append launch data to the hash (e.g. tgWebAppPlatform=tdesktop); only our own part may force the site.
+function forcesDesktop(): boolean {
+  const own = window.location.hash.toLowerCase().split('webapp')[0];
+  const search = window.location.search.toLowerCase();
+  return own.includes('site') || own.includes('desktop') || search.includes('site') || search.includes('desktop');
+}
+
 function App() {
   const content = useSiteContent();
   const [isTmaMode, setIsTmaMode] = useState(() => {
@@ -44,7 +51,7 @@ function App() {
 
     // На смартфонах и планшетах открываем Mini App интерфейс LogBook по умолчанию
     const isMobileDevice = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || window.innerWidth <= 768;
-    const forceDesktop = hash.includes('site') || hash.includes('desktop') || search.includes('site') || search.includes('desktop');
+    const forceDesktop = forcesDesktop();
 
     return (hasMiniAppInUrl || isTg || isMax || isMobileDevice) && !forceDesktop;
   });
@@ -54,7 +61,7 @@ function App() {
       const hash = window.location.hash.toLowerCase();
       const search = window.location.search.toLowerCase();
       const pathname = window.location.pathname.toLowerCase();
-      const forceDesktop = hash.includes('site') || hash.includes('desktop') || search.includes('site') || search.includes('desktop');
+      const forceDesktop = forcesDesktop();
 
       const hasMiniAppInUrl = 
         hash.includes('app') ||

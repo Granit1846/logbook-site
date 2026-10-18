@@ -13,6 +13,8 @@
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:image" content="/hero-screenshot.png" />
     <script src="https://st.max.ru/js/max-web-app.js"></script>
+    <!-- MAX mobile shows "Техническая заминка" if ready() comes late; signal it before the app bundle loads. -->
+    <script>try { window.WebApp && window.WebApp.ready && window.WebApp.ready(); } catch (e) {}</script>
     <script src="/js/telegram-web-app.js" defer></script>
   </head>
   <body>
