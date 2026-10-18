@@ -49,11 +49,9 @@ function App() {
     // Проверяем MAX WebApp окружение
     const isMax = isRunningInMax();
 
-    // На смартфонах и планшетах открываем Mini App интерфейс LogBook по умолчанию
-    const isMobileDevice = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || window.innerWidth <= 768;
     const forceDesktop = forcesDesktop();
 
-    return (hasMiniAppInUrl || isTg || isMax || isMobileDevice) && !forceDesktop;
+    return (hasMiniAppInUrl || isTg || isMax) && !forceDesktop;
   });
 
   useEffect(() => {
@@ -74,9 +72,8 @@ function App() {
         pathname.includes('/max') ||
         pathname.includes('/tg');
 
-      const isMobileDevice = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || window.innerWidth <= 768;
 
-      if (!forceDesktop && (hasMiniAppInUrl || isRunningInTelegram() || isRunningInMax() || isMobileDevice)) {
+      if (!forceDesktop && (hasMiniAppInUrl || isRunningInTelegram() || isRunningInMax())) {
         setIsTmaMode(true);
       } else if (forceDesktop) {
         setIsTmaMode(false);
