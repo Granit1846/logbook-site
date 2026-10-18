@@ -94,6 +94,10 @@ async function pilotIdFor(platform: string, platformId: number, url: string, key
 }
 
 async function issueTokenHash(email: string, url: string, key: string): Promise<string> {
+  return (await generateLink(email, url, key)).tokenHash;
+}
+
+async function generateLink(email: string, url: string, key: string): Promise<{ tokenHash: string; userId: string }> {
   const response = await fetch(`${url}/auth/v1/admin/generate_link`, {
     method: 'POST',
     headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
@@ -102,8 +106,9 @@ async function issueTokenHash(email: string, url: string, key: string): Promise<
   if (!response.ok) throw new Error('auth_unavailable');
   const result = await response.json();
   const tokenHash = result?.hashed_token ?? result?.properties?.hashed_token;
-  if (typeof tokenHash !== 'string' || !tokenHash) throw new Error('auth_unavailable');
-  return tokenHash;
+  const userId = result?.id ?? result?.user?.id;
+  if (typeof tokenHash !== 'string' || !tokenHash || typeof userId !== 'string') throw new Error('auth_unavailable');
+  return { tokenHash, userId };
 }
 
 async function botSession(body: Record<string, unknown>): Promise<Response> {
@@ -170,9 +175,16 @@ function randomHex(bytes: number): string {
 }
 
 // Android/desktop login: the app gets a code for the bot link plus a secret that only it knows.
-async function startCode(): Promise<Response> {
+// With link=true the signed-in email account becomes the email alias of the bot account once confirmed.
+async function startCode(request: Request, link: boolean): Promise<Response> {
   const { url, key } = serviceCredentials();
   const headers = { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' };
+  let linkUserId: string | null = null;
+  if (link) {
+    const { user } = await signedInUser(request, url, key);
+    if (/@telegram\.logbook$/.test(user.email ?? '')) throw new Error('not_email_account');
+    linkUserId = user.id;
+  }
   const endpoint = `${url}/rest/v1/telegram_auth_sessions`;
   const stale = new Date(Date.now() - 600000).toISOString();
   await fetch(`${endpoint}?created_at=lt.${encodeURIComponent(stale)}`, { method: 'DELETE', headers });
@@ -181,7 +193,7 @@ async function startCode(): Promise<Response> {
   const response = await fetch(endpoint, {
     method: 'POST',
     headers: { ...headers, Prefer: 'return=minimal' },
-    body: JSON.stringify({ code, status: 'pending', poll_hash: await sha256Hex(secret) }),
+    body: JSON.stringify({ code, status: 'pending', poll_hash: await sha256Hex(secret), link_user_id: linkUserId }),
   });
   if (!response.ok) throw new Error('auth_unavailable');
   return new Response(JSON.stringify({ code, secret }));
@@ -197,13 +209,17 @@ async function pollCode(body: Record<string, unknown>): Promise<Response> {
   const since = new Date(Date.now() - 600000).toISOString();
   const filter = `${url}/rest/v1/telegram_auth_sessions?code=eq.${code}&poll_hash=eq.${await sha256Hex(secret)}&created_at=gte.${encodeURIComponent(since)}`;
   // Deleting the confirmed row makes the code single-use even if two polls race.
-  const taken = await fetch(`${filter}&status=eq.confirmed&select=auth_email`, {
+  const taken = await fetch(`${filter}&status=eq.confirmed&select=auth_email,link_user_id`, {
     method: 'DELETE',
     headers: { ...headers, Prefer: 'return=representation' },
   });
   if (!taken.ok) throw new Error('auth_unavailable');
-  const email = ((await taken.json()) as Array<{ auth_email?: string }>)[0]?.auth_email;
-  if (email) return new Response(JSON.stringify({ status: 'confirmed', tokenHash: await issueTokenHash(email, url, key) }));
+  const row = ((await taken.json()) as Array<{ auth_email?: string; link_user_id?: string | null }>)[0];
+  if (row?.auth_email) {
+    const { tokenHash, userId } = await generateLink(row.auth_email, url, key);
+    if (row.link_user_id) await attachAlias(row.link_user_id, userId, url, key);
+    return new Response(JSON.stringify({ status: 'confirmed', tokenHash }));
+  }
   const pending = await fetch(`${filter}&select=status`, { headers });
   if (!pending.ok) throw new Error('auth_unavailable');
   if (((await pending.json()) as unknown[]).length === 0) throw new Error('code_not_found');
@@ -243,6 +259,90 @@ async function updateMaxLink(body: Record<string, unknown>): Promise<Response> {
   return new Response('{"ok":true}');
 }
 
+async function signedInUser(request: Request, url: string, key: string): Promise<{ token: string; user: Record<string, any> }> {
+  const token = (request.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '');
+  if (!token) throw new Error('not_signed_in');
+  const response = await fetch(`${url}/auth/v1/user`, { headers: { apikey: key, Authorization: `Bearer ${token}` } });
+  if (!response.ok) throw new Error('not_signed_in');
+  return { token, user: await response.json() };
+}
+
+// Email login for bot accounts: a separate Auth user (the alias) holds the email and the password hash,
+// so the tg_<id>@telegram.logbook account and every pilotId derived from it stay unchanged.
+async function linkEmail(request: Request, body: Record<string, unknown>): Promise<Response> {
+  const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
+  const password = body.password;
+  if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.endsWith('@telegram.logbook') ||
+    typeof password !== 'string' || password.length < 6 || password.length > 72) throw new Error('invalid_link_email');
+  const { url, key } = serviceCredentials();
+  const { user } = await signedInUser(request, url, key);
+  if (!/^tg_\d+@telegram\.logbook$/.test(user.email ?? '')) throw new Error('not_bot_account');
+  const admin = `${url}/auth/v1/admin/users`;
+  const headers = { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' };
+  // shortcut: the address is not confirmed by a letter (same as before); add a confirmation step if squatting becomes a problem.
+  const fields = JSON.stringify({ email, password, email_confirm: true, app_metadata: { alias_of: user.id } });
+  const aliasId = user.app_metadata?.email_alias_id;
+  let response = typeof aliasId === 'string'
+    ? await fetch(`${admin}/${aliasId}`, { method: 'PUT', headers, body: fields })
+    : null;
+  if (!response || response.status === 404) response = await fetch(admin, { method: 'POST', headers, body: fields });
+  if (response.status === 422) {
+    // A separate email account the user registered earlier: knowing its password lets it become the alias.
+    const owned = await fetch(`${url}/auth/v1/token?grant_type=password`, {
+      method: 'POST', headers, body: JSON.stringify({ email, password }),
+    });
+    if (owned.ok) {
+      const session = await owned.json();
+      await fetch(`${url}/auth/v1/logout?scope=global`, { method: 'POST', headers: { apikey: key, Authorization: `Bearer ${session.access_token}` } });
+      response = await fetch(`${admin}/${session.user.id}`, { method: 'PUT', headers, body: fields });
+    }
+  }
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const code = String(result?.error_code ?? result?.code ?? '');
+    throw new Error(code === 'weak_password' ? 'weak_password' : response.status === 422 ? 'email_taken' : 'auth_unavailable');
+  }
+  const linked = await fetch(`${admin}/${user.id}`, {
+    method: 'PUT',
+    headers,
+    body: JSON.stringify({ app_metadata: { email_alias_id: result.id }, user_metadata: { linked_email: email } }),
+  });
+  if (!linked.ok) throw new Error('auth_unavailable');
+  return new Response('{"ok":true}');
+}
+
+// Same pointers as linkEmail, for an email account that already has its own password.
+async function attachAlias(aliasId: string, accountId: string, url: string, key: string): Promise<void> {
+  const admin = `${url}/auth/v1/admin/users`;
+  const headers = { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' };
+  const alias = await fetch(`${admin}/${aliasId}`, {
+    method: 'PUT', headers, body: JSON.stringify({ app_metadata: { alias_of: accountId } }),
+  });
+  if (!alias.ok) throw new Error('auth_unavailable');
+  const email = (await alias.json())?.email;
+  const account = await fetch(`${admin}/${accountId}`, {
+    method: 'PUT',
+    headers,
+    body: JSON.stringify({ app_metadata: { email_alias_id: aliasId }, user_metadata: { linked_email: email } }),
+  });
+  if (!account.ok) throw new Error('auth_unavailable');
+}
+
+// Supabase Auth has already checked the alias password; trade that session for the bot account.
+async function aliasSession(request: Request): Promise<Response> {
+  const { url, key } = serviceCredentials();
+  const { token, user } = await signedInUser(request, url, key);
+  const ownerId = user.app_metadata?.alias_of;
+  if (typeof ownerId !== 'string' || !/^[0-9a-f-]{36}$/i.test(ownerId)) throw new Error('not_email_alias');
+  const owner = await fetch(`${url}/auth/v1/admin/users/${ownerId}`, { headers: { apikey: key, Authorization: `Bearer ${key}` } });
+  if (!owner.ok) throw new Error('not_email_alias');
+  const account = await owner.json();
+  // An alias replaced by a later relink must no longer open the account.
+  if (account?.app_metadata?.email_alias_id !== user.id || typeof account.email !== 'string') throw new Error('not_email_alias');
+  await fetch(`${url}/auth/v1/logout?scope=global`, { method: 'POST', headers: { apikey: key, Authorization: `Bearer ${token}` } });
+  return new Response(JSON.stringify({ tokenHash: await issueTokenHash(account.email, url, key) }));
+}
+
 Deno.serve(async (request) => {
   const origin = request.headers.get('origin') ?? '';
   const headers = {
@@ -274,11 +374,19 @@ Deno.serve(async (request) => {
       return new Response(result.body, { headers });
     }
     if (parsed.action === 'start_code') {
-      const result = await startCode();
+      const result = await startCode(request, parsed.link === true);
       return new Response(result.body, { headers });
     }
     if (parsed.action === 'poll_code') {
       const result = await pollCode(parsed);
+      return new Response(result.body, { headers });
+    }
+    if (parsed.action === 'link_email') {
+      const result = await linkEmail(request, parsed);
+      return new Response(result.body, { headers });
+    }
+    if (parsed.action === 'alias_session') {
+      const result = await aliasSession(request);
       return new Response(result.body, { headers });
     }
     const { platform, initData } = parsed;
@@ -291,7 +399,7 @@ Deno.serve(async (request) => {
     return new Response(JSON.stringify({ tokenHash }), { headers });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'auth_unavailable';
-    const status = message === 'auth_not_configured' || message === 'auth_unavailable' || message === 'link_unavailable' ? 503 : 400;
+    const status = message === 'not_signed_in' ? 401 : message === 'email_taken' ? 409 : message === 'auth_not_configured' || message === 'auth_unavailable' || message === 'link_unavailable' ? 503 : 400;
     return new Response(JSON.stringify({ error: message }), { status, headers });
   }
 });
