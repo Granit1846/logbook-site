@@ -21,4 +21,7 @@ dist-ssr
 *.sln
 *.sw?
 .env
+bots/*subscribers.json
+bots/max_link_requests.json
+bots/tmp_*
 .bolt

@@ -3,9 +3,8 @@ import { ChevronDown, ChevronLeft, Gauge, Info, Plane, RefreshCw, Settings, User
 import { FlightsTab } from './FlightsTab';
 import { ResourcesTab } from './ResourcesTab';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/lib/supabase';
 import { TelegramMiniAppService, type CloudProfileData } from '@/lib/tmaService';
-import { getTelegramWebApp, getMaxWebApp, getAppPlatformUser, isRunningInTelegram, isRunningInMax, triggerHaptic } from '@/lib/telegram';
+import { getTelegramWebApp, getMaxWebApp, isRunningInTelegram, isRunningInMax, triggerHaptic } from '@/lib/telegram';
 
 export const TelegramMiniApp: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'flights' | 'resources'>('flights');
@@ -17,23 +16,9 @@ export const TelegramMiniApp: React.FC = () => {
   const [cloudError, setCloudError] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [lastPilotId, setLastPilotId] = useState(() => {
-    try {
-      return localStorage.getItem('logbook_last_pilot_id') || '';
-    } catch {
-      return '';
-    }
-  });
-  const [pilotIdInput, setPilotIdInput] = useState(() => {
-    try {
-      return localStorage.getItem('logbook_last_pilot_id') || '';
-    } catch {
-      return '';
-    }
-  });
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState('');
-  const { user, loading: authLoading, signIn, signInWithTelegramUser, signInWithPilotId, signOut } = useAuth();
+  const { user, loading: authLoading, signIn, signInWithTelegramUser, signOut } = useAuth();
   const inTelegram = isRunningInTelegram();
   const inMax = isRunningInMax();
   const localProfiles = useMemo(() => TelegramMiniAppService.getBoards(), []);
@@ -67,175 +52,31 @@ export const TelegramMiniApp: React.FC = () => {
   useEffect(() => { void loadCloudProfiles(); }, [loadCloudProfiles]);
 
   useEffect(() => {
-    if (user?.email) {
-      const match = user.email.match(/^tg_(\d+)@telegram\.logbook$/);
-      if (match) {
-        const id = match[1];
-        try {
-          localStorage.setItem('logbook_last_pilot_id', id);
-          setLastPilotId(id);
-          setPilotIdInput(id);
-        } catch {}
-      }
-    }
-  }, [user]);
-
-  useEffect(() => {
-    let canceled = false;
+    if (user || authLoading) return;
+    let cancelled = false;
+    let running = false;
     let attempts = 0;
-
-    const checkAutoLogin = async () => {
-      if (canceled || user || authLoading || authBusy) return true;
-
-      // 1. Платформенный пользователь (Telegram или MAX)
-      const platformUser = getAppPlatformUser();
-      if (platformUser && platformUser.id) {
-        setAuthBusy(true);
-        try {
-          const res = await signInWithTelegramUser(platformUser);
-          if (res.error) {
-            if (!canceled) setAuthError(res.error);
-          } else {
-            return true;
-          }
-        } finally {
-          if (!canceled) setAuthBusy(false);
-        }
-      }
-
-      // 2. Если открыто в клиенте MAX, но параметры пользователя ещё не проброшены
-      if (isRunningInMax()) {
-        try {
-          const { data: maxRow } = await supabase
-            .from('telegram_auth_sessions')
-            .select('telegram_id, auth_email, auth_password')
-            .in('code', ['max_user_252125236', 'max_chat_292825613'])
-            .limit(1)
-            .maybeSingle();
-
-          if (maxRow?.auth_email && maxRow?.auth_password) {
-            setAuthBusy(true);
-            const { error: maxErr } = await supabase.auth.signInWithPassword({
-              email: maxRow.auth_email,
-              password: maxRow.auth_password
-            });
-            if (!maxErr) {
-              if (maxRow.telegram_id) {
-                try {
-                  localStorage.setItem('logbook_last_pilot_id', String(maxRow.telegram_id));
-                  setLastPilotId(String(maxRow.telegram_id));
-                  setPilotIdInput(String(maxRow.telegram_id));
-                } catch {}
-              }
-              return true;
-            }
-          }
-        } catch {
-        } finally {
-          if (!canceled) setAuthBusy(false);
-        }
-      }
-
-      // 3. Автоматический вход по ранее сохранённому ID пилота (если пользователь уже заходил)
-      const cached = lastPilotId || (typeof localStorage !== 'undefined' ? localStorage.getItem('logbook_last_pilot_id') : '');
-      if (cached) {
-        setAuthBusy(true);
-        try {
-          const res = await signInWithPilotId(cached);
-          if (!res.error) return true;
-        } finally {
-          if (!canceled) setAuthBusy(false);
-        }
-      }
-
-      // 4. Резервный вход для профиля Сергея в клиенте MAX
-      if (isRunningInMax()) {
-        setAuthBusy(true);
-        try {
-          const res = await signInWithPilotId('891159880');
-          if (!res.error) return true;
-        } finally {
-          if (!canceled) setAuthBusy(false);
-        }
-      }
-
-      return false;
-    };
-
-    void checkAutoLogin().then((done) => {
-      if (!done && !canceled) {
-        const timer = setInterval(async () => {
-          attempts++;
-          const ok = await checkAutoLogin();
-          if (ok || attempts >= 8) {
-            clearInterval(timer);
-          }
-        }, 300);
-      }
-    });
-
-    return () => {
-      canceled = true;
-    };
-  }, [user, authLoading, authBusy, signInWithTelegramUser, signInWithPilotId, lastPilotId]);
-
-  useEffect(() => {
-
-    // 2. Проверяем параметры автологина из URL (например, при открытии по прямой ссылке с токеном)
-    if (!user && !authLoading && !authBusy && typeof window !== 'undefined') {
-      try {
-        const fullUrl = window.location.href;
-        let authParam = '';
-
-        const urlParams = new URLSearchParams(window.location.search);
-        authParam = urlParams.get('auth') || '';
-
-        const hashIdx = fullUrl.indexOf('#');
-        if (!authParam && hashIdx !== -1) {
-          const hashPart = fullUrl.substring(hashIdx);
-          const hashQ = hashPart.indexOf('?');
-          if (hashQ !== -1) {
-            const hashParams = new URLSearchParams(hashPart.substring(hashQ));
-            authParam = hashParams.get('auth') || '';
-          }
-        }
-
-        if (authParam) {
-          setAuthBusy(true);
-          const base64 = authParam.replace(/-/g, '+').replace(/_/g, '/');
-          const decoded = decodeURIComponent(escape(atob(base64)));
-          const parsed = JSON.parse(decoded);
-          if (parsed.e && parsed.p) {
-            const idMatch = String(parsed.e).match(/^tg_(\d+)@telegram\.logbook$/);
-            if (idMatch) {
-              try {
-                localStorage.setItem('logbook_last_pilot_id', idMatch[1]);
-                setLastPilotId(idMatch[1]);
-                setPilotIdInput(idMatch[1]);
-              } catch {}
-            }
-            signIn(parsed.e, parsed.p)
-              .then((res) => {
-                if (res.error) {
-                  setAuthError(res.error);
-                } else {
-                  // Очищаем токен из адресной строки
-                  const cleanHash = (window.location.hash || '').split('?')[0] || '#app';
-                  window.history.replaceState(null, '', window.location.pathname + cleanHash);
-                }
-              })
-              .finally(() => setAuthBusy(false));
-          } else {
-            setAuthBusy(false);
-          }
-        }
-      } catch (err) {
-        console.warn('Auto-login error:', err);
+    const tryLogin = async () => {
+      if (cancelled || running) return;
+      const launchData = isRunningInMax() ? getMaxWebApp()?.initData : getTelegramWebApp()?.initData;
+      if (!launchData) return;
+      running = true;
+      clearInterval(timer);
+      setAuthBusy(true);
+      const result = await signInWithTelegramUser();
+      if (!cancelled) {
         setAuthBusy(false);
+        setAuthError(result.error || '');
       }
-    }
-  }, [user, authLoading, signInWithTelegramUser, signIn, authBusy]);
-
+    };
+    const timer = setInterval(() => {
+      attempts++;
+      void tryLogin();
+      if (attempts >= 12) clearInterval(timer);
+    }, 250);
+    void tryLogin();
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [user, authLoading, signInWithTelegramUser]);
   useEffect(() => {
     // 1. Telegram WebApp инициализация
     if (isRunningInTelegram()) {
@@ -300,7 +141,7 @@ export const TelegramMiniApp: React.FC = () => {
     <div className="relative mx-auto flex min-h-screen max-w-md select-none flex-col bg-[#1C1C1E] text-[#F0F0F0]">
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-[#3A3A3C] bg-[#2A2A2D] px-3">
         <div className="flex min-w-0 items-center gap-2">
-          <button onClick={() => { triggerHaptic('light'); if (inTelegram) { try { getTelegramWebApp()?.close(); } catch {} } else if (inMax) { try { getMaxWebApp()?.close(); } catch {} } else { window.location.hash = ''; window.location.href = window.location.pathname; } }} className="-ml-1 flex h-11 w-11 items-center justify-center rounded-lg hover:bg-white/5" aria-label="Назад"><ChevronLeft className="h-6 w-6" /></button>
+          <button onClick={() => { triggerHaptic('light'); if (inTelegram) { try { getTelegramWebApp()?.close(); } catch {} } else if (inMax) { try { getMaxWebApp()?.close?.(); } catch {} } else { window.location.hash = ''; window.location.href = window.location.pathname; } }} className="-ml-1 flex h-11 w-11 items-center justify-center rounded-lg hover:bg-white/5" aria-label="Назад"><ChevronLeft className="h-6 w-6" /></button>
           <span className="truncate text-[15px] font-semibold tracking-wide">{selectedBoard || '—'} / {tabLabel}</span>
         </div>
         <div className="flex items-center gap-1">
@@ -323,43 +164,16 @@ export const TelegramMiniApp: React.FC = () => {
           <button
             type="button"
             onClick={async () => {
-              triggerHaptic('light');
-              const tgUser = getTelegramWebApp()?.initDataUnsafe?.user;
-              if (lastPilotId) {
-                setAuthBusy(true);
-                setAuthError('');
-                const res = await signInWithPilotId(lastPilotId);
-                setAuthBusy(false);
-                if (res.error) {
-                  setSettingsOpen(true);
-                  setAuthError(res.error);
-                }
-              } else if (tgUser) {
-                setAuthBusy(true);
-                setAuthError('');
-                const res = await signInWithTelegramUser(tgUser);
-                setAuthBusy(false);
-                if (res.error) {
-                  setSettingsOpen(true);
-                  setAuthError(res.error);
-                }
-              } else {
-                setSettingsOpen(true);
-              }
+              setAuthBusy(true);
+              setAuthError('');
+              const result = await signInWithTelegramUser();
+              setAuthBusy(false);
+              if (result.error) { setAuthError(result.error); setSettingsOpen(true); }
             }}
             disabled={authBusy}
-            className="mt-2.5 flex w-full items-center justify-between rounded-lg border border-[#FFD60A]/30 bg-[#FFD60A]/10 px-3 py-2 text-left text-[11px] text-[#FFD60A] transition-colors hover:bg-[#FFD60A]/20 disabled:opacity-50"
+            className="mt-2.5 flex h-11 w-full items-center justify-center rounded-lg bg-[#229ED9] text-[12px] font-semibold text-white disabled:opacity-50"
           >
-            <span>
-              {authBusy
-                ? 'Выполняется вход в профиль…'
-                : lastPilotId
-                ? `Войти в профиль пилота (${lastPilotId})`
-                : 'Войти в профиль пилота (по ID)'}
-            </span>
-            <span className="font-semibold underline">
-              {authBusy ? '⏳' : lastPilotId ? 'Войти в 1 клик ➔' : 'Ввести ID ➔'}
-            </span>
+            {authBusy ? 'Проверяем вход…' : 'Войти через MAX / Telegram'}
           </button>
         )}
       </div>
@@ -436,66 +250,18 @@ export const TelegramMiniApp: React.FC = () => {
                         ✈️ Профиль пилота LogBook (MAX / Telegram)
                       </span>
                       <p className="text-[11px] text-[#AAA]">
-                        Мгновенный вход в ваш аккаунт со всеми бортами и налётами:
+                        Вход подтверждается при открытии приложения через кнопку бота MAX или Telegram.
                       </p>
-                      {lastPilotId && (
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            triggerHaptic('light');
-                            setAuthBusy(true);
-                            setAuthError('');
-                            const res = await signInWithPilotId(lastPilotId);
-                            setAuthBusy(false);
-                            if (res.error) {
-                              setAuthError(res.error);
-                            } else {
-                              setSettingsOpen(false);
-                            }
-                          }}
-                          disabled={authBusy}
-                          className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#229ED9] font-semibold text-white shadow transition-all active:scale-[0.98] disabled:opacity-50"
-                        >
-                          {authBusy ? 'Вход…' : `Войти в профиль (${lastPilotId}) ➔`}
-                        </button>
-                      )}
-
-                      <div className="pt-1 flex gap-1.5">
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          placeholder="ID пилота (Telegram / MAX)"
-                          value={pilotIdInput}
-                          onChange={(e) => setPilotIdInput(e.target.value)}
-                          className="h-10 flex-1 rounded-xl border border-[#3A3A3C] bg-[#2A2A2D] px-3 text-[12px] outline-none focus:border-[#229ED9]"
-                        />
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            const trimmed = pilotIdInput.trim();
-                            if (!trimmed) return;
-                            triggerHaptic('light');
-                            setAuthBusy(true);
-                            setAuthError('');
-                            const res = await signInWithPilotId(trimmed);
-                            setAuthBusy(false);
-                            if (res.error) {
-                              setAuthError(res.error);
-                            } else {
-                              try {
-                                localStorage.setItem('logbook_last_pilot_id', trimmed);
-                                setLastPilotId(trimmed);
-                              } catch {}
-                              setSettingsOpen(false);
-                            }
-                          }}
-                          disabled={authBusy}
-                          className="h-10 px-3 rounded-xl border border-[#3A3A3C] bg-[#2A2A2D] text-[12px] font-semibold text-[#DDD] hover:bg-white/5 disabled:opacity-50"
-                        >
-                          Войти по ID
-                        </button>
-                      </div>
-                      {authError && <p className="text-[#FF7068] text-[11px]">{authError}</p>}
+                      <button type="button" onClick={async () => {
+                        setAuthBusy(true);
+                        setAuthError('');
+                        const result = await signInWithTelegramUser();
+                        setAuthBusy(false);
+                        if (result.error) setAuthError(result.error);
+                        else setSettingsOpen(false);
+                      }} disabled={authBusy} className="h-11 w-full rounded-xl bg-[#229ED9] font-semibold text-white disabled:opacity-50">
+                        {authBusy ? 'Проверяем вход…' : 'Повторить вход через бота'}
+                      </button>                      {authError && <p className="text-[#FF7068] text-[11px]">{authError}</p>}
                     </div>
 
                     <form onSubmit={submitLogin} className="space-y-2.5 pt-1">

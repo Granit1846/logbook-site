@@ -77,6 +77,7 @@ declare global {
       initData?: string;
       initDataUnsafe?: {
         user?: TelegramUser;
+        chat?: { id?: number };
         query_id?: string;
         auth_date?: number;
         hash?: string;
@@ -95,6 +96,10 @@ declare global {
         offClick: (cb: () => void) => void;
         show: () => void;
         hide: () => void;
+      };
+      HapticFeedback?: {
+        impactOccurred?: (style: 'light' | 'medium' | 'heavy') => void;
+        notificationOccurred?: (type: 'success' | 'warning' | 'error') => void;
       };
     };
   }
@@ -122,95 +127,8 @@ export function isRunningInTelegram(): boolean {
 
 export function isRunningInMax(): boolean {
   if (typeof window === 'undefined') return false;
-
-  // 1. Нативный WebView MAX (Android/iOS внедряет window.WebViewHandler или MaxBridge)
-  const win = window as unknown as { WebViewHandler?: unknown; MaxBridge?: unknown; Android?: unknown };
-  if (typeof win.WebViewHandler !== 'undefined' || typeof win.MaxBridge !== 'undefined') {
-    return true;
-  }
-
-  // 2. Запуск во фрейме на веб-платформе MAX
-  if (window.self !== window.top) {
-    return true;
-  }
-
-  // 3. User-Agent
-  const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
-  if (/MAX/i.test(ua)) return true;
-
-  // 4. Referrer от платформы MAX
-  try {
-    const ref = document.referrer || '';
-    if (/(?:max|oneme)\.ru/i.test(ref)) return true;
-  } catch {}
-
-  // 5. Наличие параметров WebAppData / WebAppPlatform / startapp в URL
-  try {
-    const full = window.location.href;
-    if (/WebAppData|WebAppPlatform|startapp/i.test(full)) return true;
-    if (window.location.hash.toLowerCase().includes('max') || window.location.search.toLowerCase().includes('max')) return true;
-  } catch {}
-
-  // 6. Объект WebApp от max-web-app.js
   const max = window.WebApp;
-  if (max && (max.initData || max.platform || max.initDataUnsafe?.user || max.initDataUnsafe?.chat)) {
-    return true;
-  }
-
-  return false;
-}
-
-export function getAppPlatformUser(): TelegramUser | null {
-  // 1. Telegram WebApp user
-  const tgUser = getTelegramWebApp()?.initDataUnsafe?.user;
-  if (tgUser && tgUser.id) return tgUser;
-
-  // 2. MAX WebApp user
-  const max = getMaxWebApp();
-  const maxUser = max?.initDataUnsafe?.user;
-  if (maxUser && maxUser.id) return maxUser;
-
-  // 3. MAX WebApp chat (например, ID диалога или чата)
-  if (max?.initDataUnsafe?.chat?.id) {
-    const cid = Number(max.initDataUnsafe.chat.id);
-    if (!isNaN(cid) && cid !== 0) {
-      return { id: cid, first_name: 'MAX' };
-    }
-  }
-
-  // 4. Параметры URL (search и hash: userId, user_id, uid, chatId, chat_id, id)
-  if (typeof window !== 'undefined') {
-    try {
-      const fullUrl = window.location.href;
-      const searchParams = new URLSearchParams(window.location.search);
-      const hashPart = window.location.hash.replace(/^#/, '');
-      const hashParams = new URLSearchParams(hashPart.includes('?') ? hashPart.substring(hashPart.indexOf('?') + 1) : hashPart);
-
-      const findParam = (key: string) => searchParams.get(key) || hashParams.get(key);
-      const rawId = findParam('userId') || findParam('user_id') || findParam('uid') || findParam('chatId') || findParam('chat_id') || findParam('pilotId') || findParam('id');
-      if (rawId) {
-        const parsed = parseInt(rawId.replace(/\D/g, ''), 10);
-        if (!isNaN(parsed) && parsed > 0) {
-          return { id: parsed, first_name: 'Пилот' };
-        }
-      }
-    } catch {}
-  }
-
-  // 5. Если запущен внутри MAX мессенджера — проверяем сохранённый ID пилота
-  if (isRunningInMax() && typeof localStorage !== 'undefined') {
-    try {
-      const saved = localStorage.getItem('logbook_last_pilot_id');
-      if (saved) {
-        const parsed = parseInt(saved.replace(/\D/g, ''), 10);
-        if (!isNaN(parsed) && parsed > 0) {
-          return { id: parsed, first_name: 'Пилот' };
-        }
-      }
-    } catch {}
-  }
-
-  return null;
+  return Boolean(max?.initData || max?.platform || new URLSearchParams(window.location.hash.slice(1)).has('WebAppData'));
 }
 
 export function triggerHaptic(style: 'light' | 'medium' | 'heavy' = 'light') {
@@ -240,4 +158,3 @@ export function triggerHapticNotification(type: 'success' | 'warning' | 'error')
     // ignore
   }
 }
-
