@@ -4,6 +4,7 @@ import {
   AlertCircle, Clock,
 } from 'lucide-react';
 import { LaunchCard } from './LaunchCard';
+import { useHorizontalSwipe } from '@/hooks/useHorizontalSwipe';
 import { triggerHaptic, triggerHapticNotification, getTelegramWebApp, isRunningInTelegram } from '@/lib/telegram';
 import { TelegramMiniAppService, type FlightEntryDraft, type LaunchDraft, type SnkDraft } from '@/lib/tmaService';
 
@@ -55,6 +56,9 @@ export const FlightsTab: React.FC<FlightsTabProps> = ({ activeBoard }) => {
     nextDate.setDate(nextDate.getDate() + delta);
     setDate(nextDate.toISOString().split('T')[0]);
   };
+
+  // Swipe left/right flips to the next/previous day, like the arrows around the date.
+  const { ref: swipeRef, swipeProps } = useHorizontalSwipe<HTMLDivElement>({ onPrev: () => shiftDate(-1), onNext: () => shiftDate(1) });
 
   const formatDateDisplay = (iso: string) => {
     const value = new Date(iso);
@@ -144,7 +148,7 @@ export const FlightsTab: React.FC<FlightsTabProps> = ({ activeBoard }) => {
   };
 
   return (
-    <div className="space-y-3 px-3 pb-28 pt-3">
+    <div ref={swipeRef} {...swipeProps} className="space-y-3 px-3 pb-28 pt-3">
       <div className="flex items-center justify-center">
         <div className="flex items-center gap-2 rounded-full border border-[#3A3A3C] bg-[#2A2A2D] px-2 py-1.5">
           <button onClick={() => shiftDate(-1)} className="flex h-9 w-9 items-center justify-center rounded-full transition-colors hover:bg-white/5" aria-label="Предыдущий день">

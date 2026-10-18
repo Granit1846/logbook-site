@@ -13,6 +13,8 @@ import {
   History,
   CheckCircle2,
 } from 'lucide-react';
+import { useHorizontalSwipe } from '@/hooks/useHorizontalSwipe';
+import { triggerHaptic } from '@/lib/telegram';
 import type { CloudProfileData, CloudOilResource, CloudMaintenanceWork } from '@/lib/tmaService';
 import { addCalendarMonths, aggregateSne, calendarDaysBetween, calendarProgress, hourStatus as calculateHourStatus, maintenanceStatus, oilRemaining, parseResourceDate, resourceCalendarStatus, resourceExpiry } from '@/lib/resourceMath';
 
@@ -749,6 +751,15 @@ const CALENDAR_STANDARDS: CalendarDef[] = [
 export const ResourcesTab: React.FC<ResourcesTabProps> = ({ profile, loading, error, onRefresh }) => {
   const [section, setSection] = useState<'aggregates' | 'oils' | 'journal'>('aggregates');
   const [journalView, setJournalView] = useState<'due' | 'history'>('due');
+  // Swipe left/right moves between Aggregates, Oils and Journal.
+  const sectionOrder = ['aggregates', 'oils', 'journal'] as const;
+  const sectionIndex = sectionOrder.indexOf(section);
+  const { ref: swipeRef, swipeProps } = useHorizontalSwipe<HTMLDivElement>({
+    onPrev: () => { triggerHaptic('light'); setSection(sectionOrder[sectionIndex - 1]); },
+    onNext: () => { triggerHaptic('light'); setSection(sectionOrder[sectionIndex + 1]); },
+    canPrev: sectionIndex > 0,
+    canNext: sectionIndex < sectionOrder.length - 1,
+  });
 
   if (loading) {
     return (
@@ -789,7 +800,7 @@ export const ResourcesTab: React.FC<ResourcesTabProps> = ({ profile, loading, er
   ];
 
   return (
-    <div className="space-y-3 px-3 pb-6 pt-3">
+    <div ref={swipeRef} {...swipeProps} className="space-y-3 px-3 pb-6 pt-3">
       {/* Шапка борта */}
       <div className="flex items-center justify-between px-1">
         <div>

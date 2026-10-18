@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Delete } from 'lucide-react';
 import { calcSnk, calcStandard, calcTime } from '@/lib/flightCalc';
 import { triggerHaptic } from '@/lib/telegram';
+import { useHorizontalSwipe } from '@/hooks/useHorizontalSwipe';
 
 type Mode = 'time' | 'snk' | 'standard';
 
@@ -57,6 +58,14 @@ export function CalculatorTab() {
   const [inputs, setInputs] = useState<Record<Mode, string>>({ time: '', snk: '', standard: '' });
   const current = MODES.find((item) => item.id === mode)!;
   const expr = inputs[mode];
+  // Swipe left/right moves between the calculator modes.
+  const modeIndex = MODES.findIndex((item) => item.id === mode);
+  const { ref: swipeRef, swipeProps } = useHorizontalSwipe<HTMLDivElement>({
+    onPrev: () => { triggerHaptic('light'); setMode(MODES[modeIndex - 1].id); },
+    onNext: () => { triggerHaptic('light'); setMode(MODES[modeIndex + 1].id); },
+    canPrev: modeIndex > 0,
+    canNext: modeIndex < MODES.length - 1,
+  });
 
   const onKey = (key: string) => {
     triggerHaptic('light');
@@ -80,7 +89,7 @@ export function CalculatorTab() {
   }
 
   return (
-    <div className="space-y-3 p-3">
+    <div ref={swipeRef} {...swipeProps} className="space-y-3 p-3">
       <div className="flex rounded-xl border border-[#3A3A3C] bg-[#2A2A2D] p-1" role="tablist" aria-label="Режим калькулятора">
         {MODES.map((item) => (
           <button
@@ -100,7 +109,7 @@ export function CalculatorTab() {
         <p className="mb-3 text-[11px] leading-snug text-[#999]">{current.hint}</p>
 
         <div className="rounded-lg bg-[#1C1C1E] px-3 py-2.5" aria-live="polite">
-          <div className="min-h-[32px] overflow-x-auto whitespace-nowrap text-right text-[24px] font-semibold tracking-wide text-[#F0F0F0]" aria-label="Выражение">
+          <div data-no-swipe className="min-h-[32px] overflow-x-auto whitespace-nowrap text-right text-[24px] font-semibold tracking-wide text-[#F0F0F0]" aria-label="Выражение">
             {expr || <span className="text-[#555]">0</span>}
           </div>
           <div className="mt-1 min-h-[52px] text-right">
