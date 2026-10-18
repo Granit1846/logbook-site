@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Calculator, ChevronDown, ChevronLeft, Gauge, Info, Plane, RefreshCw, Settings, UserCircle, X, ExternalLink } from 'lucide-react';
+import { Calculator, ChevronDown, Gauge, Info, Plane, RefreshCw, Settings, UserCircle, X, ExternalLink } from 'lucide-react';
 import { FlightsTab } from './FlightsTab';
 import { ResourcesTab } from './ResourcesTab';
 import { CalculatorTab } from './CalculatorTab';
@@ -21,7 +21,6 @@ export const TelegramMiniApp: React.FC = () => {
   const [authError, setAuthError] = useState('');
   const { user, loading: authLoading, signIn, signInWithTelegramUser, signOut } = useAuth();
   const inTelegram = isRunningInTelegram();
-  const inMax = isRunningInMax();
   const localProfiles = useMemo(() => TelegramMiniAppService.getBoards(), []);
 
   const loadCloudProfiles = useCallback(async () => {
@@ -111,7 +110,6 @@ export const TelegramMiniApp: React.FC = () => {
     ? cloudProfiles.map((profile) => ({ id: profile.id, name: profile.name, boardNumber: profile.boardNumber }))
     : localProfiles;
   const activeCloudProfile = cloudProfiles.find((profile) => profile.boardNumber === selectedBoard);
-  const tabLabel = activeTab === 'flights' ? 'Полёты' : activeTab === 'resources' ? 'Ресурсы' : 'Калькулятор';
   const accountLabel = authLoading ? 'Проверка аккаунта…' : user?.email || (inTelegram ? 'Вход не выполнен' : 'Локальный режим');
 
   const selectBoard = (boardNumber: string) => {
@@ -141,43 +139,38 @@ export const TelegramMiniApp: React.FC = () => {
 
   return (
     <div className="relative mx-auto flex min-h-screen max-w-md select-none flex-col bg-[#1C1C1E] text-[#F0F0F0]">
-      <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-[#3A3A3C] bg-[#2A2A2D] px-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <button onClick={() => { triggerHaptic('light'); if (inTelegram) { try { getTelegramWebApp()?.close(); } catch {} } else if (inMax) { try { getMaxWebApp()?.close?.(); } catch {} } else { window.location.hash = ''; window.location.href = window.location.pathname; } }} className="-ml-1 flex h-11 w-11 items-center justify-center rounded-lg hover:bg-white/5" aria-label="Назад"><ChevronLeft className="h-6 w-6" /></button>
-          <span className="truncate text-[15px] font-semibold tracking-wide">{selectedBoard || '—'} / {tabLabel}</span>
+      <div className="mx-3 mt-3 flex gap-2 rounded-xl border border-[#3A3A3C] bg-[#2A2A2D] p-2.5">
+        <div className="min-w-0 flex-1">
+          <div className="mb-1.5 flex items-center gap-1.5 text-[10px] text-[#888]"><UserCircle className="h-3.5 w-3.5 text-[#229ED9]" /><span className="truncate">{accountLabel}</span></div>
+          <label className="relative block">
+            <span className="sr-only">Активный профиль</span>
+            <select value={selectedBoard} onChange={(event) => selectBoard(event.target.value)} disabled={profileOptions.length === 0} className="h-11 w-full appearance-none rounded-lg border border-[#3A3A3C] bg-[#1C1C1E] px-3 pr-10 text-[13px] font-semibold text-[#F0F0F0] outline-none focus:border-[#229ED9] disabled:text-[#666]">
+              {profileOptions.length === 0 && <option value="">Нет профилей в Supabase</option>}
+              {profileOptions.map((profile) => <option key={profile.id} value={profile.boardNumber}>{profile.name} · борт {profile.boardNumber}</option>)}
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#777]" />
+          </label>
+          {!user && (
+            <button
+              type="button"
+              onClick={async () => {
+                setAuthBusy(true);
+                setAuthError('');
+                const result = await signInWithTelegramUser();
+                setAuthBusy(false);
+                if (result.error) { setAuthError(result.error); setSettingsOpen(true); }
+              }}
+              disabled={authBusy}
+              className="mt-2.5 flex h-11 w-full items-center justify-center rounded-lg bg-[#229ED9] text-[12px] font-semibold text-white disabled:opacity-50"
+            >
+              {authBusy ? 'Проверяем вход…' : 'Войти через MAX / Telegram'}
+            </button>
+          )}
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex flex-col gap-1">
           <button onClick={() => { triggerHaptic('light'); setSettingsOpen(true); }} className="flex h-11 w-11 items-center justify-center rounded-lg hover:bg-white/5" aria-label="Настройки"><Settings className="h-5 w-5 text-[#999]" /></button>
           <button onClick={() => { triggerHaptic('light'); setInfoOpen(true); }} className="flex h-11 w-11 items-center justify-center rounded-lg hover:bg-white/5" aria-label="Информация"><Info className="h-5 w-5 text-[#999]" /></button>
         </div>
-      </header>
-
-      <div className="mx-3 mt-3 rounded-xl border border-[#3A3A3C] bg-[#2A2A2D] p-2.5">
-        <div className="mb-1.5 flex items-center gap-1.5 text-[10px] text-[#888]"><UserCircle className="h-3.5 w-3.5 text-[#229ED9]" /><span className="truncate">{accountLabel}</span></div>
-        <label className="relative block">
-          <span className="sr-only">Активный профиль</span>
-          <select value={selectedBoard} onChange={(event) => selectBoard(event.target.value)} disabled={profileOptions.length === 0} className="h-11 w-full appearance-none rounded-lg border border-[#3A3A3C] bg-[#1C1C1E] px-3 pr-10 text-[13px] font-semibold text-[#F0F0F0] outline-none focus:border-[#229ED9] disabled:text-[#666]">
-            {profileOptions.length === 0 && <option value="">Нет профилей в Supabase</option>}
-            {profileOptions.map((profile) => <option key={profile.id} value={profile.boardNumber}>{profile.name} · борт {profile.boardNumber}</option>)}
-          </select>
-          <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#777]" />
-        </label>
-        {!user && (
-          <button
-            type="button"
-            onClick={async () => {
-              setAuthBusy(true);
-              setAuthError('');
-              const result = await signInWithTelegramUser();
-              setAuthBusy(false);
-              if (result.error) { setAuthError(result.error); setSettingsOpen(true); }
-            }}
-            disabled={authBusy}
-            className="mt-2.5 flex h-11 w-full items-center justify-center rounded-lg bg-[#229ED9] text-[12px] font-semibold text-white disabled:opacity-50"
-          >
-            {authBusy ? 'Проверяем вход…' : 'Войти через MAX / Telegram'}
-          </button>
-        )}
       </div>
 
       <div className="mx-3 mt-2 flex rounded-xl border border-[#3A3A3C] bg-[#2A2A2D] p-1.5">
