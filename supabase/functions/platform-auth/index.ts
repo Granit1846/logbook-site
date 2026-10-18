@@ -161,6 +161,55 @@ async function confirmCode(body: Record<string, unknown>): Promise<Response> {
   return new Response('{"ok":true}');
 }
 
+async function sha256Hex(value: string): Promise<string> {
+  return hex(new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(value))));
+}
+
+function randomHex(bytes: number): string {
+  return hex(crypto.getRandomValues(new Uint8Array(bytes)));
+}
+
+// Android/desktop login: the app gets a code for the bot link plus a secret that only it knows.
+async function startCode(): Promise<Response> {
+  const { url, key } = serviceCredentials();
+  const headers = { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' };
+  const endpoint = `${url}/rest/v1/telegram_auth_sessions`;
+  const stale = new Date(Date.now() - 600000).toISOString();
+  await fetch(`${endpoint}?created_at=lt.${encodeURIComponent(stale)}`, { method: 'DELETE', headers });
+  const code = `auth_${randomHex(12)}`;
+  const secret = randomHex(32);
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: { ...headers, Prefer: 'return=minimal' },
+    body: JSON.stringify({ code, status: 'pending', poll_hash: await sha256Hex(secret) }),
+  });
+  if (!response.ok) throw new Error('auth_unavailable');
+  return new Response(JSON.stringify({ code, secret }));
+}
+
+async function pollCode(body: Record<string, unknown>): Promise<Response> {
+  const code = body.code;
+  const secret = body.secret;
+  if (typeof code !== 'string' || !/^auth_[a-f0-9]{24}$/.test(code) ||
+    typeof secret !== 'string' || !/^[a-f0-9]{64}$/.test(secret)) throw new Error('invalid_poll_request');
+  const { url, key } = serviceCredentials();
+  const headers = { apikey: key, Authorization: `Bearer ${key}` };
+  const since = new Date(Date.now() - 600000).toISOString();
+  const filter = `${url}/rest/v1/telegram_auth_sessions?code=eq.${code}&poll_hash=eq.${await sha256Hex(secret)}&created_at=gte.${encodeURIComponent(since)}`;
+  // Deleting the confirmed row makes the code single-use even if two polls race.
+  const taken = await fetch(`${filter}&status=eq.confirmed&select=auth_email`, {
+    method: 'DELETE',
+    headers: { ...headers, Prefer: 'return=representation' },
+  });
+  if (!taken.ok) throw new Error('auth_unavailable');
+  const email = ((await taken.json()) as Array<{ auth_email?: string }>)[0]?.auth_email;
+  if (email) return new Response(JSON.stringify({ status: 'confirmed', tokenHash: await issueTokenHash(email, url, key) }));
+  const pending = await fetch(`${filter}&select=status`, { headers });
+  if (!pending.ok) throw new Error('auth_unavailable');
+  if (((await pending.json()) as unknown[]).length === 0) throw new Error('code_not_found');
+  return new Response('{"status":"pending"}');
+}
+
 async function updateMaxLink(body: Record<string, unknown>): Promise<Response> {
   const action = body.action;
   const maxId = Number(body.maxId);
@@ -222,6 +271,14 @@ Deno.serve(async (request) => {
     }
     if (parsed.action === 'confirm_code') {
       const result = await confirmCode(parsed);
+      return new Response(result.body, { headers });
+    }
+    if (parsed.action === 'start_code') {
+      const result = await startCode();
+      return new Response(result.body, { headers });
+    }
+    if (parsed.action === 'poll_code') {
+      const result = await pollCode(parsed);
       return new Response(result.body, { headers });
     }
     const { platform, initData } = parsed;
