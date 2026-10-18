@@ -20,11 +20,21 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { getPlatformSession, confirmPlatformCode } = require('./platform_session');
+// Tokens (.env), subscriber lists, link requests and temporary files live outside the repository.
+const DATA_DIR = process.env.LOGBOOK_BOT_DATA || __dirname;
 const tls = require('tls');
+
+// Предотвращение падения процесса при сбоях сети/сокетов
+process.on('uncaughtException', (err) => {
+    console.error('[Process uncaughtException]:', err?.message || err);
+});
+process.on('unhandledRejection', (reason) => {
+    console.error('[Process unhandledRejection]:', reason?.message || reason);
+});
 
 // Загрузка переменных окружения из .env (без внешних зависимостей)
 function loadEnv() {
-    const envPath = path.join(__dirname, '.env');
+    const envPath = path.join(DATA_DIR, '.env');
     if (fs.existsSync(envPath)) {
         const content = fs.readFileSync(envPath, 'utf8');
         content.split(/\r?\n/).forEach(line => {
@@ -48,7 +58,7 @@ const MAX_BOT_TOKEN = process.env.MAX_BOT_TOKEN;
 if (!MAX_BOT_TOKEN) throw new Error('MAX_BOT_TOKEN is required in .env');
 const ADMIN_ID = Number(process.env.ADMIN_ID) || 891159880;
 
-const SUBSCRIBERS_FILE = path.join(__dirname, 'max_subscribers.json');
+const SUBSCRIBERS_FILE = path.join(DATA_DIR, 'max_subscribers.json');
 
 // Загрузка подписчиков MAX
 function loadSubscribers() {
@@ -120,7 +130,7 @@ function maxRequest(method, endpoint, payload = null) {
             console.warn(`[maxRequest https fallback ${method}]:`, err.message);
             // Резервный вызов через curl.exe при сбоях сокета
             try {
-                const tmpPayload = path.join(__dirname, `tmp_max_${Date.now()}_${Math.random().toString(36).substring(2)}.json`);
+                const tmpPayload = path.join(DATA_DIR, `tmp_max_${Date.now()}_${Math.random().toString(36).substring(2)}.json`);
                 const url = `https://platform-api2.max.ru${endpoint}`;
                 const args = ['--cacert', path.join(__dirname, 'certs/russian_trusted_root_ca_pem.crt'), '-s', '-X', method, url, '-H', `Authorization: ${MAX_BOT_TOKEN}`];
                 if (payload) {
@@ -1141,7 +1151,7 @@ async function handleBackupCommand(chatId, userId) {
         const boardNumber = cloud.tables.profiles?.[0]?.boardNumber || 'All';
         const dateStr = new Date().toISOString().split('T')[0];
         const fileName = `LogBook_MAX_Backup_${boardNumber}_${dateStr}.json`;
-        const filePath = path.join(__dirname, fileName);
+        const filePath = path.join(DATA_DIR, fileName);
 
         fs.writeFileSync(filePath, JSON.stringify(cloud.exchange, null, 2), 'utf8');
 
@@ -1605,7 +1615,7 @@ async function handleMaxEvent(update) {
             );
             return;
         }
-        const requestsFile = path.join(__dirname, 'max_link_requests.json');
+        const requestsFile = path.join(DATA_DIR, 'max_link_requests.json');
         const requests = fs.existsSync(requestsFile) ? JSON.parse(fs.readFileSync(requestsFile, 'utf8')) : [];
         const request = requests.find(item => item.code === code && Number(item.maxId) === Number(userId) && item.expiresAt > Date.now());
         if (!request) {

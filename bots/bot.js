@@ -14,10 +14,20 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { getPlatformSession, confirmPlatformCode } = require('./platform_session');
+// Tokens (.env), subscriber lists, link requests and temporary files live outside the repository.
+const DATA_DIR = process.env.LOGBOOK_BOT_DATA || __dirname;
+
+// Предотвращение падения процесса при сбоях сети/сокетов
+process.on('uncaughtException', (err) => {
+    console.error('[Process uncaughtException]:', err?.message || err);
+});
+process.on('unhandledRejection', (reason) => {
+    console.error('[Process unhandledRejection]:', reason?.message || reason);
+});
 
 // Загрузка переменных окружения из .env (без внешних зависимостей)
 function loadEnv() {
-    const envPath = path.join(__dirname, '.env');
+    const envPath = path.join(DATA_DIR, '.env');
     if (fs.existsSync(envPath)) {
         const content = fs.readFileSync(envPath, 'utf8');
         content.split(/\r?\n/).forEach(line => {
@@ -41,8 +51,8 @@ const BOT_TOKEN = process.env.BOT_TOKEN;
 if (!BOT_TOKEN) throw new Error('BOT_TOKEN is required in .env');
 const ADMIN_ID = Number(process.env.ADMIN_ID) || 891159880;
 
-const SUBSCRIBERS_FILE = path.join(__dirname, 'subscribers.json');
-const TMP_PAYLOAD = path.join(__dirname, 'tmp_payload.json');
+const SUBSCRIBERS_FILE = path.join(DATA_DIR, 'subscribers.json');
+const TMP_PAYLOAD = path.join(DATA_DIR, 'tmp_payload.json');
 
 // Загрузка подписчиков
 function loadSubscribers() {
@@ -118,7 +128,7 @@ function tgRequest(method, payload = null) {
             console.warn(`[tgRequest https fallback ${method}]:`, err.message);
             // Резервный вызов через curl.exe при сбоях сокета
             try {
-                const tmpPayload = path.join(__dirname, `tmp_${Date.now()}_${Math.random().toString(36).substring(2)}.json`);
+                const tmpPayload = path.join(DATA_DIR, `tmp_${Date.now()}_${Math.random().toString(36).substring(2)}.json`);
                 const url = `https://api.telegram.org/bot${BOT_TOKEN}/${method}`;
                 const args = ['-s', '-X', 'POST', url];
                 if (payload) {
@@ -1045,7 +1055,7 @@ async function handleBackupCommand(chatId, userId) {
         const boardNumber = cloud.selectedBoard || cloud.tables.profiles?.[0]?.boardNumber || 'All';
         const dateStr = new Date().toISOString().split('T')[0];
         const fileName = `LogBook_Backup_${boardNumber}_${dateStr}.json`;
-        const filePath = path.join(__dirname, fileName);
+        const filePath = path.join(DATA_DIR, fileName);
 
         fs.writeFileSync(filePath, JSON.stringify(cloud.exchange, null, 2), 'utf8');
 
@@ -1089,7 +1099,7 @@ function getMainMenuKeyboard(selectedBoard) {
                 { text: '💾 Бэкап базы', callback_data: 'cmd_backup' },
                 { text: '📖 Все команды', callback_data: 'cmd_help' }
             ],
-            [{ text: '📱 Открыть LogBook App', web_app: { url: 'https://logbook-site-five.vercel.app/#tg' } }]
+            [{ text: '📱 Открыть LogBook App', web_app: { url: 'https://granit1846.github.io/#tg' } }]
         ]
     };
 }
@@ -1940,7 +1950,7 @@ async function handleUpdate(update) {
             return;
         }
 
-        const requestsFile = path.join(__dirname, 'max_link_requests.json');
+        const requestsFile = path.join(DATA_DIR, 'max_link_requests.json');
         const requests = fs.existsSync(requestsFile) ? JSON.parse(fs.readFileSync(requestsFile, 'utf8')) : [];
         const valid = requests.filter(request => request.expiresAt > Date.now() && request.maxId !== maxId);
         const code = crypto.randomBytes(16).toString('hex');
@@ -2084,7 +2094,7 @@ async function startBot() {
                 type: 'web_app',
                 text: 'Открыть',
                 web_app: {
-                    url: 'https://logbook-site-five.vercel.app/#tg'
+                    url: 'https://granit1846.github.io/#tg'
                 }
             }
         });
