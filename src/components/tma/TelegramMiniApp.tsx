@@ -1,13 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronLeft, Gauge, Info, Plane, RefreshCw, Settings, UserCircle, X, ExternalLink } from 'lucide-react';
+import { Calculator, ChevronDown, ChevronLeft, Gauge, Info, Plane, RefreshCw, Settings, UserCircle, X, ExternalLink } from 'lucide-react';
 import { FlightsTab } from './FlightsTab';
 import { ResourcesTab } from './ResourcesTab';
+import { CalculatorTab } from './CalculatorTab';
 import { useAuth } from '@/contexts/AuthContext';
 import { TelegramMiniAppService, type CloudProfileData } from '@/lib/tmaService';
 import { getTelegramWebApp, getMaxWebApp, isRunningInTelegram, isRunningInMax, triggerHaptic } from '@/lib/telegram';
 
 export const TelegramMiniApp: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'flights' | 'resources'>('flights');
+  const [activeTab, setActiveTab] = useState<'flights' | 'resources' | 'calc'>('flights');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
   const [selectedBoard, setSelectedBoard] = useState(() => TelegramMiniAppService.getActiveBoard());
@@ -110,7 +111,7 @@ export const TelegramMiniApp: React.FC = () => {
     ? cloudProfiles.map((profile) => ({ id: profile.id, name: profile.name, boardNumber: profile.boardNumber }))
     : localProfiles;
   const activeCloudProfile = cloudProfiles.find((profile) => profile.boardNumber === selectedBoard);
-  const tabLabel = activeTab === 'flights' ? 'Полёты' : 'Ресурсы';
+  const tabLabel = activeTab === 'flights' ? 'Полёты' : activeTab === 'resources' ? 'Ресурсы' : 'Калькулятор';
   const accountLabel = authLoading ? 'Проверка аккаунта…' : user?.email || (inTelegram ? 'Вход не выполнен' : 'Локальный режим');
 
   const selectBoard = (boardNumber: string) => {
@@ -182,12 +183,13 @@ export const TelegramMiniApp: React.FC = () => {
       <div className="mx-3 mt-2 flex rounded-xl border border-[#3A3A3C] bg-[#2A2A2D] p-1.5">
         <button onClick={() => { triggerHaptic('light'); setActiveTab('flights'); }} className="flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-[13px] font-semibold" style={{ backgroundColor: activeTab === 'flights' ? '#229ED9' : 'transparent', color: activeTab === 'flights' ? '#fff' : '#999' }}><Plane className="h-4 w-4" /> Полёты</button>
         <button onClick={() => { triggerHaptic('light'); setActiveTab('resources'); }} className="flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-[13px] font-semibold" style={{ backgroundColor: activeTab === 'resources' ? '#229ED9' : 'transparent', color: activeTab === 'resources' ? '#fff' : '#999' }}><Gauge className="h-4 w-4" /> Ресурсы</button>
+        <button onClick={() => { triggerHaptic('light'); setActiveTab('calc'); }} className="flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-[13px] font-semibold" style={{ backgroundColor: activeTab === 'calc' ? '#229ED9' : 'transparent', color: activeTab === 'calc' ? '#fff' : '#999' }}><Calculator className="h-4 w-4" /> Калькулятор</button>
       </div>
 
       <main className="flex-1 overflow-y-auto">
-        {activeTab === 'flights'
-          ? <FlightsTab activeBoard={selectedBoard} />
-          : <ResourcesTab profile={activeCloudProfile} loading={cloudLoading} error={cloudError} onRefresh={() => void loadCloudProfiles()} />}
+        {activeTab === 'flights' && <FlightsTab activeBoard={selectedBoard} />}
+        {activeTab === 'resources' && <ResourcesTab profile={activeCloudProfile} loading={cloudLoading} error={cloudError} onRefresh={() => void loadCloudProfiles()} />}
+        {activeTab === 'calc' && <CalculatorTab />}
       </main>
 
       {(settingsOpen || infoOpen) && (
