@@ -8,8 +8,30 @@ test('time mode sums hh:mm with any separator, bare numbers are hours', () => {
   assert.equal(calcTime('1.45 + 0.35')?.text, '2ч 20м');
   assert.equal(calcTime('2 - 0:30')?.hm, '1:30');
   assert.equal(calcTime('0:30 - 1')?.hm, '-0:30');
-  assert.equal(calcTime('1:30 * 2'), null);
   assert.equal(calcTime(''), null);
+});
+
+test('time mode reads one digit after the separator as tens of minutes', () => {
+  assert.equal(calcTime('12.2')?.hm, '12:20');
+  assert.equal(calcTime('12,2')?.hm, '12:20');
+  assert.equal(calcTime('12,02')?.hm, '12:02');
+  assert.equal(calcTime('1,5 + 0,3')?.hm, '2:20');
+  assert.equal(calcTime('0,3 × 3')?.hm, '1:30');
+  assert.equal(calcTime('1,6'), null);
+});
+
+test('time mode multiplies one time value by whole counts', () => {
+  assert.equal(calcTime('0,45 × 3')?.hm, '2:15');
+  assert.equal(calcTime('3 × 0,45')?.hm, '2:15');
+  assert.equal(calcTime('1:30 * 2')?.hm, '3:00');
+  assert.equal(calcTime('2 × 3')?.hm, '6:00');
+  assert.equal(calcTime('1,00 + 0,45 × 2')?.hm, '2:30');
+  assert.equal(calcTime('0,20 × 2 × 3')?.hm, '2:00');
+  assert.equal(calcTime('5 − 0,45 × 2')?.hm, '3:30');
+  assert.equal(calcTime('1,30 +')?.hm, '1:30');
+  assert.equal(calcTime('1,30 × 0,45'), null);
+  assert.equal(calcTime('1,75'), null);
+  assert.equal(calcTime('1,30 ÷ 2'), null);
 });
 
 test('SNK mode adds decimal hours and rounds to whole minutes', () => {

@@ -20,19 +20,48 @@ function formatMinutes(totalMinutes: number): TimeResult {
   return { hm: `${sign}${hours}:${mm}`, text: `${sign}${hours}ч ${mm}м`, totalMinutes };
 }
 
-/** Flight time sums in hh:mm. ':', '.' and ',' all separate hours from minutes; a bare number is whole hours. */
+/**
+ * Flight time in hh:mm. ':', '.' and ',' all separate hours from minutes; a bare number is whole hours.
+ * Products repeat a time: each term may hold one time value times whole-number counts (0:45 × 3, 3 × 0:45);
+ * if no factor has minutes, the first factor is the hours. A trailing operator is ignored while typing.
+ */
 export function calcTime(input: string): TimeResult | null {
-  const norm = input.trim().replace(/[.,]/g, ':');
-  if (!norm || !/^[\d:+\-\s]+$/.test(norm)) return null;
-  const regex = /([+-]?)\s*(\d+)(?::([0-5]?\d))?/g;
+  const norm = input.replace(/\s+/g, '').replace(/[.,]/g, ':').replace(/[×*]/g, '*').replace(/−/g, '-');
+  if (!norm || !/^[\d:+\-*]+$/.test(norm)) return null;
+  const tokens = norm.match(/[+\-*]|\d+(?::\d{0,2})?/g) ?? [];
+  if (tokens.join('') !== norm) return null;
+
+  let i = 0;
   let total = 0;
-  let count = 0;
-  for (let match = regex.exec(norm); match; match = regex.exec(norm)) {
-    const sign = match[1] === '-' ? -1 : 1;
-    total += sign * (Number(match[2]) * 60 + (match[3] !== undefined ? Number(match[3]) : 0));
-    count++;
+  let sign = 1;
+  if (tokens[0] === '+' || tokens[0] === '-') sign = tokens[i++] === '-' ? -1 : 1;
+  while (i < tokens.length) {
+    const factors: string[] = [];
+    while (i < tokens.length && /^\d/.test(tokens[i])) {
+      factors.push(tokens[i++]);
+      if (tokens[i] === '*') i++;
+      else break;
+    }
+    if (factors.length === 0) return null;
+    const times = factors.filter((factor) => factor.includes(':'));
+    if (times.length > 1) return null;
+    const timeFactor = times[0] ?? factors[0];
+    const [hours, digits = ''] = timeFactor.split(':');
+    // One digit after the separator is tens of minutes, as written on paper: 12,2 = 12:20.
+    const minutes = digits.length === 1 ? Number(digits) * 10 : Number(digits || 0);
+    if (minutes > 59) return null;
+    let term = Number(hours) * 60 + minutes;
+    let usedTime = false;
+    for (const factor of factors) {
+      if (factor === timeFactor && !usedTime) { usedTime = true; continue; }
+      term *= Number(factor);
+    }
+    total += sign * term;
+    if (i >= tokens.length) break;
+    if (tokens[i] !== '+' && tokens[i] !== '-') return null;
+    sign = tokens[i++] === '-' ? -1 : 1;
   }
-  return count > 0 ? formatMinutes(total) : null;
+  return formatMinutes(total);
 }
 
 /** Hour meter (СНК) readings are decimal hours: sum them, then convert to hh:mm rounded to whole minutes. */

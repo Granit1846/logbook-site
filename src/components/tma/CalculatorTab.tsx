@@ -9,7 +9,7 @@ const MODES: Array<{ id: Mode; label: string; hint: string }> = [
   {
     id: 'time',
     label: 'Время',
-    hint: 'Налёт в чч:мм. Запятая отделяет минуты: 1,30 + 0,45 = 2:15; число без запятой — целые часы.',
+    hint: 'Налёт в чч:мм. Запятая отделяет минуты: 1,30 + 0,45 = 2:15; число без запятой — целые часы. Повтор одного значения: 0,45 × 3 = 2:15.',
   },
   {
     id: 'snk',
@@ -32,7 +32,7 @@ const KEYS = [
   ['0', ',', '+'],
 ];
 const OPERATORS = ['+', '−', '×', '÷'];
-const TIME_DISABLED = ['(', ')', '×', '÷'];
+const TIME_DISABLED = ['(', ')', '÷'];
 
 function press(expr: string, key: string): string {
   if (key === 'C') return '';
@@ -63,7 +63,7 @@ export function CalculatorTab() {
     setInputs((prev) => ({ ...prev, [mode]: press(prev[mode], key).slice(0, 80) }));
   };
 
-  // The display uses −, × and ÷; the calculator functions accept them (calcTime only needs + and −).
+  // The display uses −, × and ÷; the calculator functions accept them.
   const trimmed = expr.trim().replace(/−/g, '-');
   let result: { main: string; details: string } | null = null;
   if (trimmed) {
