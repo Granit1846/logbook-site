@@ -90,36 +90,63 @@ var e = class {
 	}
 	extractParamFromHashes(e) {
 		try {
-			let t = this.getHashParam(location.hash, e);
-			if (t) return t;
-			let s = new URLSearchParams(location.search).get(e);
-			if (s) return s;
-			let n = performance.getEntriesByType("navigation")[0], r = n && new URL(n.name).hash;
-			let p = r && this.getHashParam(r, e) || null;
+			const keysToTry = e === "WebAppData" ? ["WebAppData", "initData", "tgWebAppData", "data"] : [e];
+			const searchAll = (str) => {
+				if (!str) return null;
+				const parts = str.split(/[#&?]+/);
+				for (const part of parts) {
+					if (!part) continue;
+					const eq = part.indexOf('=');
+					if (eq !== -1) {
+						const k = decodeURIComponent(part.slice(0, eq).trim());
+						if (keysToTry.includes(k)) {
+							return part.slice(eq + 1).trim();
+						}
+					}
+				}
+				return null;
+			};
+
+			let val = searchAll(location.hash) || searchAll(location.search);
+			if (val) return val;
+
+			let n = performance.getEntriesByType("navigation")[0];
+			let r = n && new URL(n.name).hash;
+			let p = r && searchAll(r) || null;
 			if (p) return p;
 			let q = n && new URL(n.name).search;
-			return q && new URLSearchParams(q).get(e) || null;
+			return q && searchAll(q) || null;
 		} catch (t) {
 			return console.warn(`Ошибка при извлечении параметра ${e}:`, t), null;
 		}
 	}
 	getHashParam(e, t) {
 		try {
-			let n = e.replace(/^#/, "");
-			if (n.includes('?')) {
-				const afterQ = n.substring(n.indexOf('?') + 1);
-				const val = new URLSearchParams(afterQ).get(t);
-				if (val) return val;
+			if (!e) return null;
+			const parts = e.split(/[#&?]+/);
+			for (const part of parts) {
+				if (!part) continue;
+				const eq = part.indexOf('=');
+				if (eq !== -1) {
+					const k = decodeURIComponent(part.slice(0, eq).trim());
+					if (k === t) return part.slice(eq + 1).trim();
+				}
 			}
-			return new URLSearchParams(n).get(t);
+			return null;
 		} catch (e) {
 			return console.warn(`Ошибка при извлечении параметра ${t}:`, e), null;
 		}
 	}
 	get initData() {
+		if (!this.rawInitData) {
+			this.rawInitData = this.getParamFromHashOrStorage(e.WEB_APP_DATA_KEY);
+		}
 		return this.rawInitData;
 	}
 	get platform() {
+		if (!this.rawPlatformData) {
+			this.rawPlatformData = this.getParamFromHashOrStorage(e.WEB_APP_PLATFORM_KEY);
+		}
 		return this.isValidPlatform(this.rawPlatformData) ? this.rawPlatformData : null;
 	}
 	get version() {
@@ -132,32 +159,42 @@ var e = class {
 		return t !== null && e.VALID_PLATFORMS.includes(t);
 	}
 	get initDataUnsafe() {
-		return this.parseInitData(this.rawInitData);
+		return this.parseInitData(this.initData);
 	}
 	parseInitData(e) {
 		let t = {};
 		if (!e) return t;
+		let decoded = e;
 		try {
-			new URLSearchParams(decodeURIComponent(e)).forEach((e, n) => {
+			decoded = decodeURIComponent(e);
+		} catch {}
+		try {
+			const pairs = decoded.split('&');
+			for (const pair of pairs) {
+				const eq = pair.indexOf('=');
+				if (eq === -1) continue;
+				const n = pair.slice(0, eq).trim();
+				let val = pair.slice(eq + 1).trim();
+				try { val = decodeURIComponent(val); } catch {}
 				switch (n) {
 					case "hash":
 					case "ip":
 					case "query_id":
 					case "start_param":
-						t[n] = e;
+						t[n] = val;
 						break;
 					case "auth_date":
-						t[n] = Number(e);
+						t[n] = Number(val);
 						break;
 					case "user":
-						t[n] = this.getUserInitData(e);
+						t[n] = this.getUserInitData(val);
 						break;
 					case "chat":
-						t[n] = this.getChatInitData(e);
+						t[n] = this.getChatInitData(val);
 						break;
-					default: console.warn(`Неизвестный параметр: ${n}`);
+					default: break;
 				}
-			});
+			}
 		} catch (e) {
 			console.warn("Ошибка при парсинге init data:", e);
 		}
@@ -165,7 +202,9 @@ var e = class {
 	}
 	getUserInitData(e) {
 		try {
-			let t = JSON.parse(e);
+			let raw = e;
+			try { raw = decodeURIComponent(e); } catch {}
+			let t = typeof raw === 'object' ? raw : JSON.parse(raw);
 			if (t && typeof t == "object") return {
 				first_name: t.first_name,
 				last_name: t.last_name,
@@ -180,7 +219,9 @@ var e = class {
 	}
 	getChatInitData(e) {
 		try {
-			let t = JSON.parse(e);
+			let raw = e;
+			try { raw = decodeURIComponent(e); } catch {}
+			let t = typeof raw === 'object' ? raw : JSON.parse(raw);
 			if (t && typeof t == "object") return {
 				id: t.id,
 				type: t.type

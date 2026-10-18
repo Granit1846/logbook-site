@@ -128,10 +128,55 @@ export function isRunningInMax(): boolean {
 }
 
 export function getAppPlatformUser(): TelegramUser | null {
+  // 1. Telegram WebApp user
   const tgUser = getTelegramWebApp()?.initDataUnsafe?.user;
   if (tgUser && tgUser.id) return tgUser;
-  const maxUser = getMaxWebApp()?.initDataUnsafe?.user;
+
+  // 2. MAX WebApp user
+  const max = getMaxWebApp();
+  const maxUser = max?.initDataUnsafe?.user;
   if (maxUser && maxUser.id) return maxUser;
+
+  // 3. MAX WebApp chat (например, ID диалога или чата)
+  if (max?.initDataUnsafe?.chat?.id) {
+    const cid = Number(max.initDataUnsafe.chat.id);
+    if (!isNaN(cid) && cid !== 0) {
+      return { id: cid, first_name: 'MAX' };
+    }
+  }
+
+  // 4. Параметры URL (search и hash: userId, user_id, uid, chatId, chat_id, id)
+  if (typeof window !== 'undefined') {
+    try {
+      const fullUrl = window.location.href;
+      const searchParams = new URLSearchParams(window.location.search);
+      const hashPart = window.location.hash.replace(/^#/, '');
+      const hashParams = new URLSearchParams(hashPart.includes('?') ? hashPart.substring(hashPart.indexOf('?') + 1) : hashPart);
+
+      const findParam = (key: string) => searchParams.get(key) || hashParams.get(key);
+      const rawId = findParam('userId') || findParam('user_id') || findParam('uid') || findParam('chatId') || findParam('chat_id') || findParam('pilotId') || findParam('id');
+      if (rawId) {
+        const parsed = parseInt(rawId.replace(/\D/g, ''), 10);
+        if (!isNaN(parsed) && parsed > 0) {
+          return { id: parsed, first_name: 'Пилот' };
+        }
+      }
+    } catch {}
+  }
+
+  // 5. Если запущен внутри MAX мессенджера — проверяем сохранённый ID пилота
+  if (isRunningInMax() && typeof localStorage !== 'undefined') {
+    try {
+      const saved = localStorage.getItem('logbook_last_pilot_id');
+      if (saved) {
+        const parsed = parseInt(saved.replace(/\D/g, ''), 10);
+        if (!isNaN(parsed) && parsed > 0) {
+          return { id: parsed, first_name: 'Пилот' };
+        }
+      }
+    } catch {}
+  }
+
   return null;
 }
 

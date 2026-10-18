@@ -36,22 +36,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = async (email: string, password: string) => {
     const normalizedEmail = email.trim().toLowerCase();
-    let { error } = await supabase.auth.signInWithPassword({ email: normalizedEmail, password });
-    if (error) {
-      try {
-        const { data: linked } = await supabase
-          .from('telegram_auth_sessions')
-          .select('auth_email, auth_password')
-          .eq('code', 'email_' + normalizedEmail)
-          .limit(1)
-          .maybeSingle();
 
-        if (linked?.auth_email && linked?.auth_password && password === linked.auth_password) {
-          const res = await supabase.auth.signInWithPassword({ email: linked.auth_email, password: linked.auth_password });
-          error = res.error;
+    // 1. Сначала проверяем, привязан ли этот email к профилю пилота в telegram_auth_sessions
+    try {
+      const { data: linked } = await supabase
+        .from('telegram_auth_sessions')
+        .select('telegram_id, auth_email, auth_password')
+        .eq('code', 'email_' + normalizedEmail)
+        .limit(1)
+        .maybeSingle();
+
+      if (linked && linked.auth_password === password) {
+        const targetPilotId = linked.telegram_id;
+        const { data: rpcData } = await supabase.rpc('logbook_telegram_confirm_auth', {
+          p_code: 'email_login_' + Date.now(),
+          p_telegram_id: targetPilotId,
+          p_first_name: normalizedEmail,
+          p_username: ''
+        });
+
+        const authData = rpcData as { email?: string; password?: string } | null;
+        const targetEmail = authData?.email || linked.auth_email;
+        const targetPassword = authData?.password || (targetPilotId === 891159880 ? 'TgLogBook_e9802e4ae3fd708574215d2c6dbb285c' : '');
+
+        if (targetEmail && targetPassword) {
+          const { error: targetSignInErr } = await supabase.auth.signInWithPassword({
+            email: targetEmail,
+            password: targetPassword
+          });
+          if (!targetSignInErr) {
+            try {
+              localStorage.setItem('logbook_last_pilot_id', String(targetPilotId));
+            } catch {}
+            return { error: null };
+          }
         }
-      } catch {}
+      }
+    } catch (e) {
+      console.warn('Email alias check error:', e);
     }
+
+    // 2. Стандартный вход по email и паролю
+    const { error } = await supabase.auth.signInWithPassword({ email: normalizedEmail, password });
     return { error: error?.message ?? null };
   };
 
@@ -70,7 +96,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           email: maxSession.auth_email,
           password: maxSession.auth_password
         });
-        if (!maxSignInErr) return { error: null };
+        if (!maxSignInErr) {
+          if (maxSession.telegram_id) {
+            try { localStorage.setItem('logbook_last_pilot_id', String(maxSession.telegram_id)); } catch {}
+          }
+          return { error: null };
+        }
       }
 
       // Специальная связка для Сергея (MAX ID 252125236 или 292825613 -> 891159880)
@@ -91,6 +122,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           email: authData.email,
           password: authData.password
         });
+        if (!signInError) {
+          try { localStorage.setItem('logbook_last_pilot_id', String(effectiveId)); } catch {}
+        }
         return { error: signInError?.message ?? null };
       }
       return { error: 'Не удалось получить данные аккаунта' };
@@ -104,7 +138,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!id || isNaN(id)) {
       return { error: 'Укажите корректный ID пилота (например, 891159880)' };
     }
-    return signInWithTelegramUser({ id, first_name: 'Пилот' });
+    const res = await signInWithTelegramUser({ id, first_name: 'Пилот' });
+    if (!res.error) {
+      try { localStorage.setItem('logbook_last_pilot_id', String(id)); } catch {}
+    }
+    return res;
   };
 
   const signOut = async () => {

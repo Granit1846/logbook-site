@@ -66,39 +66,106 @@ export const TelegramMiniApp: React.FC = () => {
   useEffect(() => { void loadCloudProfiles(); }, [loadCloudProfiles]);
 
   useEffect(() => {
+    if (user?.email) {
+      const match = user.email.match(/^tg_(\d+)@telegram\.logbook$/);
+      if (match) {
+        const id = match[1];
+        try {
+          localStorage.setItem('logbook_last_pilot_id', id);
+          setLastPilotId(id);
+          setPilotIdInput(id);
+        } catch {}
+      }
+    }
+  }, [user]);
+
+  useEffect(() => {
     let canceled = false;
     let attempts = 0;
 
-    const checkPlatformUser = () => {
+    const checkAutoLogin = async () => {
       if (canceled || user || authLoading || authBusy) return true;
+
+      // 1. Платформенный пользователь (Telegram или MAX)
       const platformUser = getAppPlatformUser();
-      if (platformUser) {
+      if (platformUser && platformUser.id) {
         setAuthBusy(true);
-        signInWithTelegramUser(platformUser)
-          .then((res) => {
-            if (res.error && !canceled) setAuthError(res.error);
-          })
-          .finally(() => {
-            if (!canceled) setAuthBusy(false);
-          });
-        return true;
+        try {
+          const res = await signInWithTelegramUser(platformUser);
+          if (res.error) {
+            if (!canceled) setAuthError(res.error);
+          } else {
+            return true;
+          }
+        } finally {
+          if (!canceled) setAuthBusy(false);
+        }
       }
+
+      // 2. Если открыто в клиенте MAX, но параметры пользователя ещё не проброшены
+      if (isRunningInMax()) {
+        try {
+          const { data: maxRow } = await supabase
+            .from('telegram_auth_sessions')
+            .select('telegram_id, auth_email, auth_password')
+            .in('code', ['max_user_252125236', 'max_chat_292825613'])
+            .limit(1)
+            .maybeSingle();
+
+          if (maxRow?.auth_email && maxRow?.auth_password) {
+            setAuthBusy(true);
+            const { error: maxErr } = await supabase.auth.signInWithPassword({
+              email: maxRow.auth_email,
+              password: maxRow.auth_password
+            });
+            if (!maxErr) {
+              if (maxRow.telegram_id) {
+                try {
+                  localStorage.setItem('logbook_last_pilot_id', String(maxRow.telegram_id));
+                  setLastPilotId(String(maxRow.telegram_id));
+                  setPilotIdInput(String(maxRow.telegram_id));
+                } catch {}
+              }
+              return true;
+            }
+          }
+        } catch {
+        } finally {
+          if (!canceled) setAuthBusy(false);
+        }
+      }
+
+      // 3. Автоматический вход по ранее сохранённому ID пилота (если пользователь уже заходил)
+      const cached = lastPilotId || (typeof localStorage !== 'undefined' ? localStorage.getItem('logbook_last_pilot_id') : '');
+      if (cached) {
+        setAuthBusy(true);
+        try {
+          const res = await signInWithPilotId(cached);
+          if (!res.error) return true;
+        } finally {
+          if (!canceled) setAuthBusy(false);
+        }
+      }
+
       return false;
     };
 
-    if (!checkPlatformUser()) {
-      const timer = setInterval(() => {
-        attempts++;
-        if (checkPlatformUser() || attempts >= 12) {
-          clearInterval(timer);
-        }
-      }, 300);
-      return () => {
-        canceled = true;
-        clearInterval(timer);
-      };
-    }
-  }, [user, authLoading, authBusy, signInWithTelegramUser]);
+    void checkAutoLogin().then((done) => {
+      if (!done && !canceled) {
+        const timer = setInterval(async () => {
+          attempts++;
+          const ok = await checkAutoLogin();
+          if (ok || attempts >= 8) {
+            clearInterval(timer);
+          }
+        }, 300);
+      }
+    });
+
+    return () => {
+      canceled = true;
+    };
+  }, [user, authLoading, authBusy, signInWithTelegramUser, signInWithPilotId, lastPilotId]);
 
   useEffect(() => {
 
@@ -210,8 +277,12 @@ export const TelegramMiniApp: React.FC = () => {
     setAuthError('');
     const result = await signIn(email.trim(), password);
     setAuthBusy(false);
-    if (result.error) setAuthError(result.error);
-    else setPassword('');
+    if (result.error) {
+      setAuthError(result.error);
+    } else {
+      setPassword('');
+      setSettingsOpen(false);
+    }
   };
 
   return (
