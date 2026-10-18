@@ -32,7 +32,11 @@ export const TelegramMiniApp: React.FC = () => {
     setCloudLoading(true);
     setCloudError('');
     try {
-      const profiles = await TelegramMiniAppService.getCloudProfiles();
+      // A hung request must end with a visible error instead of an endless spinner.
+      const profiles = await Promise.race([
+        TelegramMiniAppService.getCloudProfiles(),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Supabase не ответил за 20 секунд. Проверьте интернет и нажмите «Обновить данные из Supabase».')), 20000)),
+      ]);
       setCloudProfiles(profiles);
       if (profiles.length > 0) {
         const cloudMetaBoard = (user?.user_metadata as Record<string, unknown> | undefined)?.selected_board as string | undefined;
@@ -150,6 +154,7 @@ export const TelegramMiniApp: React.FC = () => {
             </select>
             <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#777]" />
           </label>
+          {user && cloudError && <p className="mt-1.5 text-[11px] leading-snug text-[#FF6B6B]" role="alert">{cloudError}</p>}
           {!user && (
             <button
               type="button"
