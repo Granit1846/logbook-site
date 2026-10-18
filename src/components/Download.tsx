@@ -67,7 +67,7 @@ function ReleaseCard({
             <p className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">
               {windows
                 ? 'ПК · Windows 10/11 (64 бит)'
-                : 'Смартфон и планшет · Android 7.0+'}
+                : 'Смартфон и планшет · Android 8.0+'}
               {release?.sizeBytes && (
                 <span className="ml-1.5 font-medium text-gray-600 dark:text-gray-300">
                   · {(release.sizeBytes / 1048576).toFixed(1)} МБ

@@ -16,8 +16,8 @@ const sections: FooterSection[] = [
   {
     title: 'Установка и загрузка',
     links: [
-      { label: 'Скачать установщик Windows (.exe)', href: '/downloads/Logbook_Setup_1.1.16.exe', download: true },
-      { label: 'Скачать Android APK (v1.1.31)', href: '/downloads/LogBook.apk', download: true },
+      { label: 'Скачать установщик Windows (.exe)', href: '/downloads/Logbook_Setup_1.1.17.exe', download: true },
+      { label: 'Скачать Android APK (v1.1.33)', href: '/downloads/LogBook.apk', download: true },
       { label: 'Раздел загрузок', href: '#download' },
     ],
   },
@@ -109,7 +109,7 @@ export default function Footer() {
         <div className="pt-8 border-t border-gray-800/80 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-gray-500">
           <p>© {new Date().getFullYear()} LogBook. Все права защищены.</p>
           <p className="flex items-center gap-1">
-            Windows 10/11 · Android 7.0+ · Telegram Mini App
+            Windows 10/11 · Android 8.0+ · Telegram Mini App
           </p>
         </div>
       </div>

@@ -16,22 +16,22 @@ export interface ReleaseManifest {
 
 const localCurrent: Record<'windows' | 'android', ReleaseManifest> = {
   windows: {
-    version: '1.1.16',
-    url: '/downloads/Logbook_Setup_1.1.16.exe',
-    directUrl: '/downloads/Logbook_Setup_1.1.16.exe',
+    version: '1.1.17',
+    url: '/downloads/Logbook_Setup_1.1.17.exe',
+    directUrl: '/downloads/Logbook_Setup_1.1.17.exe',
     githubUrl: 'https://github.com/Granit1846/LogBook-PC/releases',
-    notes: 'Версия для Windows 10/11 (64 бит). Официальный установщик Inno Setup. Исправлена авторизация через Telegram и MAX, единый вход по Email с полной связкой профилей.',
-    sizeBytes: 73991726,
-    builtAt: '2026-10-18T02:40:00.000Z',
+    notes: 'Версия для Windows 10/11 (64 бит). Официальный установщик Inno Setup. Пароль Email хранится только в Supabase Auth, к Email-аккаунту можно привязать Telegram или MAX, синхронизация не прерывается из-за дробных значений.',
+    sizeBytes: 73989377,
+    builtAt: '2026-10-18T15:07:00.000Z',
   },
   android: {
-    version: '1.1.31',
+    version: '1.1.33',
     url: '/downloads/LogBook.apk',
     directUrl: '/downloads/LogBook.apk',
     githubUrl: 'https://github.com/Granit1846/LogBook-Android/releases',
-    notes: 'Мобильный LogBook для Android 7.0+. Формуляры вертолета (ВК-2500, ВР-80, ТА-14), журнал ТО, Wi-Fi сканер QR-кодов, авторизация и связка профилей через MAX, Telegram и Email.',
-    sizeBytes: 22147214,
-    builtAt: '2026-10-18T02:40:00.000Z',
+    notes: 'Мобильный LogBook для Android 8.0+. Синхронизация потягиванием экрана и автоповтор на нестабильной сети, даты ресурсов с полным годом, формуляры вертолета (ВК-2500, ВР-80, ТА-14), журнал ТО, вход через MAX, Telegram и Email.',
+    sizeBytes: 22651065,
+    builtAt: '2026-10-18T20:25:00.000Z',
   },
 };
 
