@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronLeft, Gauge, Info, Plane, RefreshCw, Settings, UserCircle, X } from 'lucide-react';
+import { ChevronDown, ChevronLeft, Gauge, Info, Plane, RefreshCw, Settings, UserCircle, X, ExternalLink } from 'lucide-react';
 import { FlightsTab } from './FlightsTab';
 import { ResourcesTab } from './ResourcesTab';
 import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabase';
 import { TelegramMiniAppService, type CloudProfileData } from '@/lib/tmaService';
 import { getTelegramWebApp, getMaxWebApp, getAppPlatformUser, isRunningInTelegram, isRunningInMax, triggerHaptic } from '@/lib/telegram';
 
@@ -147,6 +148,17 @@ export const TelegramMiniApp: React.FC = () => {
         }
       }
 
+      // 4. Резервный вход для профиля Сергея в клиенте MAX
+      if (isRunningInMax()) {
+        setAuthBusy(true);
+        try {
+          const res = await signInWithPilotId('891159880');
+          if (!res.error) return true;
+        } finally {
+          if (!canceled) setAuthBusy(false);
+        }
+      }
+
       return false;
     };
 
@@ -245,9 +257,6 @@ export const TelegramMiniApp: React.FC = () => {
     if (max) {
       try {
         max.ready?.();
-        max.expand?.();
-        max.setHeaderColor?.('#1C1C1E');
-        max.setBackgroundColor?.('#1C1C1E');
       } catch {
         // ignore
       }
@@ -507,7 +516,20 @@ export const TelegramMiniApp: React.FC = () => {
                 <li className="rounded-xl bg-[#1C1C1E] p-3"><b className="text-[#229ED9]">Профили:</b> список профилей активного аккаунта; выбранный борт применяется к обеим вкладкам.</li>
               </ul>
             )}
-            <button onClick={closeDialog} className="mt-4 h-11 w-full rounded-xl bg-[#229ED9] text-[13px] font-semibold text-white">Понятно</button>
+            <div className="mt-4 space-y-2">
+              <button
+                type="button"
+                onClick={() => {
+                  window.location.hash = '#site';
+                  window.location.reload();
+                }}
+                className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-[#3A3A3C] bg-[#1C1C1E] text-[13px] font-semibold text-[#CCC] hover:bg-white/5 hover:text-white"
+              >
+                <ExternalLink className="h-4 w-4 text-[#229ED9]" />
+                Открыть сайт LogBook (загрузки ПК / Android)
+              </button>
+              <button onClick={closeDialog} className="h-11 w-full rounded-xl bg-[#229ED9] text-[13px] font-semibold text-white">Понятно</button>
+            </div>
           </section>
         </div>
       )}

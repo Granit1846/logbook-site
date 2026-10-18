@@ -85,8 +85,15 @@ var e = class {
 		this.rawInitData = this.getParamFromHashOrStorage(e.WEB_APP_DATA_KEY), this.rawPlatformData = this.getParamFromHashOrStorage(e.WEB_APP_PLATFORM_KEY), this.rawVersionData = this.getParamFromHashOrStorage(e.WEB_APP_VERSION_KEY), this.rawDeviceName = this.getParamFromHashOrStorage(e.WEB_APP_DEVICE_NAME);
 	}
 	getParamFromHashOrStorage(e) {
-		let t = this.extractParamFromHashes(e);
-		return t ? (sessionStorage.setItem(e, t), t) : sessionStorage.getItem(e);
+		try {
+			let t = this.extractParamFromHashes(e);
+			if (t) {
+				try { sessionStorage.setItem(e, t); } catch {}
+				return t;
+			}
+			try { return sessionStorage.getItem(e); } catch {}
+		} catch {}
+		return null;
 	}
 	extractParamFromHashes(e) {
 		try {
@@ -107,7 +114,7 @@ var e = class {
 				return null;
 			};
 
-			let val = searchAll(location.hash) || searchAll(location.search);
+			let val = searchAll(location.hash) || searchAll(location.search) || searchAll(location.href);
 			if (val) return val;
 
 			let n = performance.getEntriesByType("navigation")[0];
@@ -550,15 +557,39 @@ var f = class {
 	async openSystemSettings() {
 		return this.checkInit("client.permissions_open_settings.not_inited"), this.checkAlreadyEnabled("client.permissions_open_settings.already_enabled", "Доступ к камере и микрофону уже предоставлен. Нет необходимости открывать системные настройки.", "system"), this._openSystemSettings();
 	}
-}, v = /^https:\/\/.*\.(?:max|oneme)\.ru$/, y = class {
+}, v = /^https:\/\/(?:[a-zA-Z0-9-]+\.)*(?:max|oneme)\.ru$/, y = class {
 	webviewBridge;
 	messageCallback;
 	isIframe() {
 		return typeof window < "u" && window.self !== window.top;
 	}
-	sendEvent;
+	sendEvent = (e, t = {}) => {
+		let sent = false;
+		if (this.isIframe()) {
+			this.sendOverIframe(e, t);
+			sent = true;
+		}
+		const bridge = typeof window !== "undefined" ? (window.WebViewHandler || window.MaxBridge || window.Android) : null;
+		if (bridge && typeof bridge.postEvent === "function") {
+			this.webviewBridge = bridge;
+			this.sendOverWebView(e, t);
+			sent = true;
+		}
+		if (typeof window !== "undefined" && window.webkit?.messageHandlers?.WebViewHandler?.postMessage) {
+			try {
+				window.webkit.messageHandlers.WebViewHandler.postMessage({ type: e, ...t });
+				sent = true;
+			} catch {}
+		}
+		if (!sent) {
+			this.sendFallback(e, t);
+		}
+	};
 	constructor(e) {
-		this.messageCallback = e, this.isIframe() ? (this.sendEvent = this.sendOverIframe, this.initializeIframeTransport()) : typeof window < "u" && window.WebViewHandler ? (this.webviewBridge = window.WebViewHandler, this.sendEvent = this.sendOverWebView) : this.sendEvent = this.sendFallback;
+		this.messageCallback = e;
+		if (this.isIframe()) {
+			this.initializeIframeTransport();
+		}
 	}
 	initializeIframeTransport() {
 		window.addEventListener("message", async (e) => {
@@ -571,16 +602,26 @@ var f = class {
 		});
 	}
 	sendOverIframe(e, t) {
-		window.parent.postMessage(JSON.stringify({
-			type: e,
-			...t
-		}), "*");
+		try {
+			window.parent.postMessage(JSON.stringify({
+				type: e,
+				...t
+			}), "*");
+		} catch {}
 	}
 	sendOverWebView(e, t) {
-		this.webviewBridge?.postEvent(e, JSON.stringify(t));
+		try {
+			this.webviewBridge?.postEvent(e, JSON.stringify(t));
+		} catch (err) {
+			try {
+				this.webviewBridge?.postEvent(e, t);
+			} catch {}
+		}
 	}
-	sendFallback(e) {
-		console.warn("[WebApp] Событие не отправлено - транспорт недоступен:", e);
+	sendFallback(e, t) {
+		try {
+			window.postMessage(JSON.stringify({ type: e, ...t }), "*");
+		} catch {}
 	}
 }, b = class {
 	pendingRequests = /* @__PURE__ */ new Map();
@@ -804,10 +845,21 @@ var f = class {
 	}
 }();
 window.WebApp = x;
-try {
-	if (typeof window !== "undefined" && (window.WebViewHandler || window.self !== window.top)) {
+
+function fireReady() {
+	try {
 		x.ready();
-		x.expand?.();
+	} catch (e) {
+		console.warn('[WebApp] ready error:', e);
 	}
-} catch {}
+}
+
+if (typeof document !== 'undefined') {
+	if (document.readyState === 'complete' || document.readyState === 'interactive') {
+		fireReady();
+	} else {
+		document.addEventListener('DOMContentLoaded', fireReady, { once: true });
+		window.addEventListener('load', fireReady, { once: true });
+	}
+}
 //#endregion

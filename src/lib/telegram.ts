@@ -123,8 +123,9 @@ export function isRunningInTelegram(): boolean {
 export function isRunningInMax(): boolean {
   if (typeof window === 'undefined') return false;
 
-  // 1. Нативный WebView MAX (Android/iOS внедряет window.WebViewHandler)
-  if (typeof (window as unknown as { WebViewHandler?: unknown }).WebViewHandler !== 'undefined') {
+  // 1. Нативный WebView MAX (Android/iOS внедряет window.WebViewHandler или MaxBridge)
+  const win = window as unknown as { WebViewHandler?: unknown; MaxBridge?: unknown; Android?: unknown };
+  if (typeof win.WebViewHandler !== 'undefined' || typeof win.MaxBridge !== 'undefined') {
     return true;
   }
 
@@ -137,14 +138,20 @@ export function isRunningInMax(): boolean {
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
   if (/MAX/i.test(ua)) return true;
 
-  // 4. Наличие параметров WebAppData / WebAppPlatform в URL
+  // 4. Referrer от платформы MAX
+  try {
+    const ref = document.referrer || '';
+    if (/(?:max|oneme)\.ru/i.test(ref)) return true;
+  } catch {}
+
+  // 5. Наличие параметров WebAppData / WebAppPlatform / startapp в URL
   try {
     const full = window.location.href;
-    if (/WebAppData|WebAppPlatform/i.test(full)) return true;
+    if (/WebAppData|WebAppPlatform|startapp/i.test(full)) return true;
     if (window.location.hash.toLowerCase().includes('max') || window.location.search.toLowerCase().includes('max')) return true;
   } catch {}
 
-  // 5. Объект WebApp
+  // 6. Объект WebApp от max-web-app.js
   const max = window.WebApp;
   if (max && (max.initData || max.platform || max.initDataUnsafe?.user || max.initDataUnsafe?.chat)) {
     return true;

@@ -42,35 +42,45 @@ function App() {
     // Проверяем MAX WebApp окружение
     const isMax = isRunningInMax();
 
-    return hasMiniAppInUrl || isTg || isMax;
+    // На смартфонах и планшетах открываем Mini App интерфейс LogBook по умолчанию
+    const isMobileDevice = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || window.innerWidth <= 768;
+    const forceDesktop = hash.includes('site') || hash.includes('desktop') || search.includes('site') || search.includes('desktop');
+
+    return (hasMiniAppInUrl || isTg || isMax || isMobileDevice) && !forceDesktop;
   });
 
   useEffect(() => {
     const checkMiniApp = () => {
       const hash = window.location.hash.toLowerCase();
       const search = window.location.search.toLowerCase();
+      const pathname = window.location.pathname.toLowerCase();
+      const forceDesktop = hash.includes('site') || hash.includes('desktop') || search.includes('site') || search.includes('desktop');
+
       const hasMiniAppInUrl = 
         hash.includes('app') ||
         hash.includes('max') ||
         hash.includes('tg') || 
         search.includes('app') ||
         search.includes('max') ||
-        search.includes('tg');
+        search.includes('tg') ||
+        pathname.includes('/app') ||
+        pathname.includes('/max') ||
+        pathname.includes('/tg');
 
-      if (hasMiniAppInUrl || isRunningInTelegram() || isRunningInMax()) {
+      const isMobileDevice = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || window.innerWidth <= 768;
+
+      if (!forceDesktop && (hasMiniAppInUrl || isRunningInTelegram() || isRunningInMax() || isMobileDevice)) {
         setIsTmaMode(true);
+      } else if (forceDesktop) {
+        setIsTmaMode(false);
       }
     };
-
 
     checkMiniApp();
     const timer = setTimeout(checkMiniApp, 200);
 
     const handleHash = () => {
-      const h = window.location.hash.toLowerCase();
-      if (h.includes('app') || h.includes('max') || h.includes('tg')) {
-        setIsTmaMode(true);
-      }
+      checkMiniApp();
     };
     window.addEventListener('hashchange', handleHash);
     return () => {
