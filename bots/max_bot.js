@@ -153,6 +153,17 @@ function sendMaxMessage(chatId, text, attachments = null) {
     return maxRequest('POST', endpoint, payload);
 }
 
+// Like Telegram's sendOrEdit: a button press updates its own message; on failure a new message is sent.
+async function sendOrEditMax(chatId, messageId, text, attachments = null) {
+    if (messageId) {
+        // An empty attachment list removes the old keyboard, as a Telegram edit without reply_markup does.
+        const payload = { text: text, format: 'html', attachments: Array.isArray(attachments) ? attachments : [] };
+        const res = await maxRequest('PUT', `/messages?message_id=${encodeURIComponent(messageId)}`, payload);
+        if (res && res.success) return res;
+    }
+    return sendMaxMessage(chatId, text, attachments);
+}
+
 
 // Загрузка и отправка файла в MAX
 async function sendMaxDocument(chatId, filePath, caption) {
@@ -164,9 +175,10 @@ async function sendMaxDocument(chatId, filePath, caption) {
             return sendMaxMessage(chatId, `⚠️ Не удалось загрузить файл: ошибка сервиса загрузки.`);
         }
 
-        // 2. Загружаем файл через curl multipart
+        // 2. Загружаем файл через curl multipart.
+        // No --cacert: it replaces the system store, and the upload host (fu.oneme.ru) uses a public CA, not the Russian root.
         const stdout = execFileSync('curl.exe', [
-            '--cacert', path.join(__dirname, 'certs/russian_trusted_root_ca_pem.crt'), '-s', '-X', 'POST',
+            '-s', '-X', 'POST',
             '-F', `data=@${filePath}`,
             uploadInfo.url
         ], { encoding: 'utf8', timeout: 60000 });
@@ -186,7 +198,18 @@ async function sendMaxDocument(chatId, filePath, caption) {
             }
         };
 
-        return await sendMaxMessage(chatId, caption || '', [attachment]);
+        // MAX processes an uploaded file asynchronously; sending it earlier fails with attachment.not.ready.
+        for (let attempt = 0; attempt < 10; attempt++) {
+            const res = await sendMaxMessage(chatId, caption || '', [attachment]);
+            // A sent message comes back as an object; an error carries `message` as its text.
+            if (res && typeof res.message === 'object') return res;
+            if (res?.code !== 'attachment.not.ready') {
+                console.error('MAX не принял сообщение с файлом:', res);
+                break;
+            }
+            await sleep(1000);
+        }
+        return sendMaxMessage(chatId, `⚠️ Не удалось прикрепить файл к сообщению.`);
     } catch (err) {
         console.error('Ошибка в sendMaxDocument:', err.message);
         return sendMaxMessage(chatId, `⚠️ Ошибка отправки документа: ${err.message}`);
@@ -253,7 +276,8 @@ async function getUserCloudData(userId, firstName = '', username = '') {
     const loginRes = await getPlatformSession('max', userId, MAX_BOT_TOKEN, SUPABASE_KEY);
     if (!loginRes?.access_token) return null;
 
-    const syncRes = await new Promise((resolve) => {
+    // Started without await so the data pull and the user lookup below run in parallel.
+    const syncPromise = new Promise((resolve) => {
         const req = https.request({
             hostname: 'zjagjauwmpuzcwzidhkn.supabase.co',
             path: '/rest/v1/rpc/logbook_sync_pull_v1',
@@ -273,9 +297,6 @@ async function getUserCloudData(userId, firstName = '', username = '') {
         req.write('{}');
         req.end();
     });
-
-    const resp = Array.isArray(syncRes) ? syncRes[0] : syncRes;
-    const exchange = resp?.payload ? (typeof resp.payload === 'string' ? JSON.parse(resp.payload) : resp.payload) : { tables: { profiles: [], days: [], launches: [] } };
 
     // Запрашиваем информацию о пользователе и выбранном борте в Supabase
     let selectedBoard = null;
@@ -300,6 +321,10 @@ async function getUserCloudData(userId, firstName = '', username = '') {
         });
         selectedBoard = userRes?.user_metadata?.selected_board || null;
     } catch {}
+
+    const syncRes = await syncPromise;
+    const resp = Array.isArray(syncRes) ? syncRes[0] : syncRes;
+    const exchange = resp?.payload ? (typeof resp.payload === 'string' ? JSON.parse(resp.payload) : resp.payload) : { tables: { profiles: [], days: [], launches: [] } };
 
     const profiles = exchange.tables?.profiles || [];
     let selectedProfile = null;
@@ -1367,6 +1392,14 @@ async function handleMaxEvent(update) {
 
     if (!text) return;
     text = text.trim();
+
+    // Only the first reply to a button press replaces that message; later replies and other chats get new ones.
+    let editTarget = callbackMessageId;
+    const reply = (targetChatId, replyText, attachments = null) => {
+        const messageId = targetChatId === chatId ? editTarget : null;
+        editTarget = null;
+        return sendOrEditMax(targetChatId, messageId, replyText, attachments);
+    };
     const lowerText = text.toLowerCase();
 
     console.log(`[MAX Сообщение] [${updateType}] От: ${chatId} (${senderName} @${senderUsername}): ${text}`);
@@ -1390,7 +1423,7 @@ async function handleMaxEvent(update) {
     if (text === 'main_menu') {
         const cloud = await getUserCloudData(userId, senderName, senderUsername);
         const board = cloud?.selectedBoard || cloud?.tables?.profiles?.[0]?.boardNumber || '';
-        sendMaxMessage(chatId, getMaxMainMenuText(senderName, board), getMaxMainMenuKeyboard(userId, board));
+        reply(chatId, getMaxMainMenuText(senderName, board), getMaxMainMenuKeyboard(userId, board));
         return;
     }
 
@@ -1399,10 +1432,10 @@ async function handleMaxEvent(update) {
         const cloud = await getUserCloudData(userId, senderName, senderUsername);
         const profiles = cloud?.tables?.profiles || [];
         if (profiles.length === 0) {
-            sendMaxMessage(chatId, '⚠️ В базе данных пока нет профилей бортов. Создайте профиль в приложении LogBook.', getMaxBackKeyboard());
+            reply(chatId, '⚠️ В базе данных пока нет профилей бортов. Создайте профиль в приложении LogBook.', getMaxBackKeyboard());
             return;
         }
-        sendMaxMessage(
+        reply(
             chatId,
             `✈️ <b>Выбор активного борта</b>\n\nТекущий борт: <b>${cloud.selectedBoard || 'не выбран'}</b>\n\nВыберите нужный борт из списка:`,
             getMaxBoardSelectionKeyboard(profiles, cloud.selectedBoard)
@@ -1420,7 +1453,7 @@ async function handleMaxEvent(update) {
         const found = profiles.find(p => String(p.boardNumber) === targetBoard || String(p.name) === targetBoard);
 
         if (!found) {
-            sendMaxMessage(chatId, `⚠️ Борт «${targetBoard}» не найден в вашей базе данных.`, getMaxBackKeyboard());
+            reply(chatId, `⚠️ Борт «${targetBoard}» не найден в вашей базе данных.`, getMaxBackKeyboard());
             return;
         }
 
@@ -1429,7 +1462,7 @@ async function handleMaxEvent(update) {
             await updateSelectedBoardInSupabase(cloud.token, newBoardNumber);
         }
 
-        sendMaxMessage(
+        reply(
             chatId,
             `✅ <b>Активный борт успешно переключён на: ${newBoardNumber}</b>\n\nТеперь все отчёты (история полётов, остатки ТО, заправки и замечания) отображаются по борту <b>${newBoardNumber}</b>.`,
             getMaxMainMenuKeyboard(userId, newBoardNumber)
@@ -1441,42 +1474,42 @@ async function handleMaxEvent(update) {
     if (text === 'cmd_history' || text.startsWith('hist_')) {
         const days = text.startsWith('hist_') ? (parseInt(text.replace('hist_', ''), 10) || 7) : 7;
         const report = await getUserFlightHistoryReport(userId, senderName, days);
-        sendMaxMessage(chatId, report, getMaxHistoryKeyboard());
+        reply(chatId, report, getMaxHistoryKeyboard());
         return;
     }
 
     if (text === 'cmd_fuel' || text.startsWith('fuel_')) {
         const days = text.startsWith('fuel_') ? (parseInt(text.replace('fuel_', ''), 10) || 7) : 7;
         const report = await getUserFuelReport(userId, senderName, days);
-        sendMaxMessage(chatId, report, getMaxFuelKeyboard());
+        reply(chatId, report, getMaxFuelKeyboard());
         return;
     }
 
     if (text === 'cmd_status') {
         const report = await getUserStatusReport(userId, senderName);
-        sendMaxMessage(chatId, report, getMaxBackKeyboard());
+        reply(chatId, report, getMaxBackKeyboard());
         return;
     }
 
     if (text === 'cmd_defects') {
         const report = await getUserDefectsReport(userId, senderName);
-        sendMaxMessage(chatId, report, getMaxBackKeyboard());
+        reply(chatId, report, getMaxBackKeyboard());
         return;
     }
 
     if (text === 'cmd_calc') {
-        sendMaxMessage(chatId, getMaxCalcHelpText(), getMaxBackKeyboard());
+        reply(chatId, getMaxCalcHelpText(), getMaxBackKeyboard());
         return;
     }
 
     if (text === 'cmd_help') {
-        sendMaxMessage(chatId, getMaxCommandsHelpText(), getMaxBackKeyboard());
+        reply(chatId, getMaxCommandsHelpText(), getMaxBackKeyboard());
         return;
     }
 
     if (text === 'cmd_backup') {
         await handleBackupCommand(chatId, userId);
-        sendMaxMessage(chatId, '💾 Резервная копия базы сформирована.', getMaxBackKeyboard());
+        reply(chatId, '💾 Резервная копия базы сформирована.', getMaxBackKeyboard());
         return;
     }
 
@@ -1494,7 +1527,7 @@ async function handleMaxEvent(update) {
 
         if (authCode) {
             if (authCode.startsWith('link_')) {
-                sendMaxMessage(chatId, 'Для привязки используйте /link в Telegram-боте и подтвердите код здесь.');
+                reply(chatId, 'Для привязки используйте /link в Telegram-боте и подтвердите код здесь.');
                 return;
             }
 
@@ -1502,14 +1535,14 @@ async function handleMaxEvent(update) {
             console.log(`🔑 [MAX] Подтверждение авторизации: код ${authCode} для пилота ${targetPilotId} (${senderName})...`);
             const confirmed = await confirmTelegramAuthInSupabase(authCode, userId);
             if (!confirmed) {
-                sendMaxMessage(chatId, 'Код входа не найден или срок его действия истёк. Запросите новый код в приложении.');
+                reply(chatId, 'Код входа не найден или срок его действия истёк. Запросите новый код в приложении.');
                 return;
             }
 
             const cloud = await getUserCloudData(userId, senderName, senderUsername);
             const board = cloud?.selectedBoard || cloud?.tables?.profiles?.[0]?.boardNumber || '';
 
-            sendMaxMessage(
+            reply(
                 chatId,
                 `✅ <b>Вход в LogBook подтверждён!</b>\n\n` +
                 `Добро пожаловать, <b>${senderName || 'пилот'}</b>!\n` +
@@ -1522,7 +1555,7 @@ async function handleMaxEvent(update) {
 
         const cloud = await getUserCloudData(userId, senderName, senderUsername);
         const board = cloud?.selectedBoard || cloud?.tables?.profiles?.[0]?.boardNumber || '';
-        sendMaxMessage(chatId, getMaxMainMenuText(senderName, board), getMaxMainMenuKeyboard(userId, board));
+        reply(chatId, getMaxMainMenuText(senderName, board), getMaxMainMenuKeyboard(userId, board));
         return;
     }
 
@@ -1530,7 +1563,7 @@ async function handleMaxEvent(update) {
     if (lowerText === '/app' || lowerText === '/приложение' || lowerText.startsWith('/app@')) {
         const appUrl = getMiniAppUrl();
         const textMsg = `📱 <b>LogBook Mini App</b>\n\nОткройте приложение кнопкой ниже или по ссылке: ${appUrl}`;
-        sendMaxMessage(chatId, textMsg, [
+        reply(chatId, textMsg, [
             {
                 type: 'inline_keyboard',
                 payload: {
@@ -1556,7 +1589,7 @@ async function handleMaxEvent(update) {
             `💡 <b>Инструкция по объединению с Telegram:</b>\n` +
             `1. В Telegram-боте @my_logbook_app_bot отправьте <code>/link ${userId}</code>.\n` +
             `2. Полученный код отправьте сюда командой <code>/link КОД</code>.`;
-        sendMaxMessage(chatId, msg, getMaxBackKeyboard());
+        reply(chatId, msg, getMaxBackKeyboard());
         return;
     }
 
@@ -1565,7 +1598,7 @@ async function handleMaxEvent(update) {
     if (linkMatch) {
         const code = linkMatch[1];
         if (!code) {
-            sendMaxMessage(
+            reply(
                 chatId,
                 'Для привязки отправьте команду /link ВАШ_MAX_ID в Telegram-боте. Полученный код пришлите сюда: /link КОД.',
                 getMaxBackKeyboard()
@@ -1576,12 +1609,12 @@ async function handleMaxEvent(update) {
         const requests = fs.existsSync(requestsFile) ? JSON.parse(fs.readFileSync(requestsFile, 'utf8')) : [];
         const request = requests.find(item => item.code === code && Number(item.maxId) === Number(userId) && item.expiresAt > Date.now());
         if (!request) {
-            sendMaxMessage(chatId, 'Код не найден или истёк. Получите новый код в Telegram-боте.', getMaxBackKeyboard());
+            reply(chatId, 'Код не найден или истёк. Получите новый код в Telegram-боте.', getMaxBackKeyboard());
             return;
         }
         const tgId = Number(request.telegramId);
         if (!await updateVerifiedMaxLink('link', Number(userId), tgId)) {
-            sendMaxMessage(chatId, 'Не удалось сохранить привязку. Повторите попытку позже.', getMaxBackKeyboard());
+            reply(chatId, 'Не удалось сохранить привязку. Повторите попытку позже.', getMaxBackKeyboard());
             return;
         }
         let subsList = loadSubscribers();
@@ -1595,7 +1628,7 @@ async function handleMaxEvent(update) {
         saveSubscribers(subsList);
         fs.writeFileSync(requestsFile, JSON.stringify(requests.filter(item => item.code !== code && item.expiresAt > Date.now())), { encoding: 'utf8', mode: 0o600 });
 
-        sendMaxMessage(
+        reply(
             chatId,
             `✅ <b>MAX связан с вашим аккаунтом Telegram.</b>\n\nДля отвязки отправьте /unlink.`,
             getMaxMainMenuKeyboard(userId)
@@ -1607,7 +1640,7 @@ async function handleMaxEvent(update) {
     // 1.4 Команда /unlink (отвязать от Telegram)
     if (lowerText === '/unlink' || lowerText === '/отвязать' || lowerText.startsWith('/unlink@')) {
         if (!await updateVerifiedMaxLink('unlink', Number(userId), 0)) {
-            sendMaxMessage(chatId, 'Не удалось отключить привязку. Повторите попытку позже.', getMaxBackKeyboard());
+            reply(chatId, 'Не удалось отключить привязку. Повторите попытку позже.', getMaxBackKeyboard());
             return;
         }
         let subsList = loadSubscribers();
@@ -1617,7 +1650,7 @@ async function handleMaxEvent(update) {
             delete sub.linkVerified;
             saveSubscribers(subsList);
         }
-        sendMaxMessage(
+        reply(
             chatId,
             `🔄 <b>Привязка отключена.</b>\n\nТеперь в MAX используется ваше личное изолированное пространство (ID: <code>${userId}</code>).`,
             getMaxMainMenuKeyboard(userId)
@@ -1629,21 +1662,21 @@ async function handleMaxEvent(update) {
     if (histMatch) {
         const daysLimit = histMatch[1] ? parseInt(histMatch[1], 10) : 7;
         const report = await getUserFlightHistoryReport(userId, senderName, daysLimit);
-        sendMaxMessage(chatId, report, getMaxHistoryKeyboard());
+        reply(chatId, report, getMaxHistoryKeyboard());
         return;
     }
 
     // 3. Команда /status
     if (lowerText === '/status' || lowerText === '/статус' || lowerText === '/remains' || lowerText === '/остатки' || lowerText.startsWith('/status@')) {
         const report = await getUserStatusReport(userId, senderName);
-        sendMaxMessage(chatId, report, getMaxBackKeyboard());
+        reply(chatId, report, getMaxBackKeyboard());
         return;
     }
 
     // 4. Команда /defects
     if (lowerText === '/defects' || lowerText === '/дефекты' || lowerText === '/замечания' || lowerText.startsWith('/defects@')) {
         const report = await getUserDefectsReport(userId, senderName);
-        sendMaxMessage(chatId, report, getMaxBackKeyboard());
+        reply(chatId, report, getMaxBackKeyboard());
         return;
     }
 
@@ -1652,7 +1685,7 @@ async function handleMaxEvent(update) {
         const cmd = lowerText.startsWith('/defect') ? '/defect' : '/дефект';
         const defectText = text.slice(text.indexOf(cmd) + cmd.length).trim();
         if (!defectText) {
-            sendMaxMessage(
+            reply(
                 chatId,
                 '💡 Чтобы добавить замечание, укажите его текст, например:\n<code>/defect Заменить лампу фары левого крыла</code>',
                 getMaxBackKeyboard()
@@ -1662,13 +1695,13 @@ async function handleMaxEvent(update) {
 
         const res = await addDefectToCloud(userId, defectText);
         if (res.ok) {
-            sendMaxMessage(
+            reply(
                 chatId,
                 `✅ <b>Замечание успешно добавлено!</b>\n\n• Борт: <b>${res.boardNumber || '—'}</b>\n• Текст: <i>${defectText}</i>\n\nЗамечание синхронизировано и отобразится в приложении LogBook.`,
                 getMaxBackKeyboard()
             );
         } else {
-            sendMaxMessage(chatId, `⚠️ Не удалось сохранить замечание: ${res.error || 'неизвестная ошибка'}`, getMaxBackKeyboard());
+            reply(chatId, `⚠️ Не удалось сохранить замечание: ${res.error || 'неизвестная ошибка'}`, getMaxBackKeyboard());
         }
         return;
     }
@@ -1678,7 +1711,7 @@ async function handleMaxEvent(update) {
     if (fuelMatch) {
         const limit = fuelMatch[1] ? parseInt(fuelMatch[1], 10) : 7;
         const report = await getUserFuelReport(userId, senderName, limit);
-        sendMaxMessage(chatId, report, getMaxFuelKeyboard());
+        reply(chatId, report, getMaxFuelKeyboard());
         return;
     }
 
@@ -1688,7 +1721,7 @@ async function handleMaxEvent(update) {
         const rawExpr = text.slice(text.toLowerCase().indexOf(cmd) + cmd.length);
         const expr = rawExpr.replace(/^@[a-zA-Z0-9_]+/, '').trim();
         const res = calcHelper(expr);
-        sendMaxMessage(chatId, res, getMaxBackKeyboard());
+        reply(chatId, res, getMaxBackKeyboard());
         return;
     }
 
@@ -1696,7 +1729,7 @@ async function handleMaxEvent(update) {
     if (lowerText.startsWith('/snk') || lowerText.startsWith('/снк') || lowerText.startsWith('snk ') || lowerText.startsWith('снк ')) {
         const rawVal = text.replace(/^(?:@[a-zA-Z0-9_]+\s*)?(?:\/snk|\/снк|snk|снк)\s*/i, '').trim();
         if (!rawVal) {
-            sendMaxMessage(
+            reply(
                 chatId,
                 '💡 Укажите значение или выражение СНК, например:\n<code>/snk 1.50</code> ➔ 1:30\n<code>/snk 1,45+1,61</code> ➔ 3:04',
                 getMaxBackKeyboard()
@@ -1705,13 +1738,13 @@ async function handleMaxEvent(update) {
         }
         const conv = convertSnkToHM(rawVal);
         if (conv) {
-            sendMaxMessage(
+            reply(
                 chatId,
                 `⏱ <b>Расчёт СНК (счётчик наработки):</b>\n<code>${escapeHtml(conv.original)}</code> = <b>${conv.hm}</b> (${conv.text})\n<i>(Десятичные часы: ${conv.decimalFormatted})</i>`,
                 getMaxBackKeyboard()
             );
         } else {
-            sendMaxMessage(
+            reply(
                 chatId,
                 `⚠️ Не удалось распознать выражение: <code>${escapeHtml(rawVal)}</code>`,
                 getMaxBackKeyboard()
@@ -1723,14 +1756,14 @@ async function handleMaxEvent(update) {
     // 8. Команда /backup
     if (lowerText === '/backup' || lowerText === '/бэкап' || lowerText.startsWith('/backup@') || lowerText.startsWith('/бэкап@')) {
         await handleBackupCommand(chatId, userId);
-        sendMaxMessage(chatId, '💾 Резервная копия базы сформирована.', getMaxBackKeyboard());
+        reply(chatId, '💾 Резервная копия базы сформирована.', getMaxBackKeyboard());
         return;
     }
 
     // 9. Команда /stats
     if (lowerText === '/stats' || lowerText.startsWith('/stats@') || lowerText === '/статистика') {
         const subsList = loadSubscribers();
-        sendMaxMessage(
+        reply(
             chatId,
             `📊 <b>Статистика пользователей MAX</b>:\nВсего зарегистрировано в боте: <b>${subsList.length}</b> чел.`,
             getMaxBackKeyboard()
@@ -1742,7 +1775,7 @@ async function handleMaxEvent(update) {
     if (lowerText.startsWith('/update') || lowerText.startsWith('/обновить') || lowerText.startsWith('/обновление')) {
         const subsList = loadSubscribers();
         if (subsList.length === 0) {
-            sendMaxMessage(chatId, '⚠️ Список пользователей MAX пуст. Никто ещё не отправил сообщение боту.', getMaxBackKeyboard());
+            reply(chatId, '⚠️ Список пользователей MAX пуст. Никто ещё не отправил сообщение боту.', getMaxBackKeyboard());
             return;
         }
 
@@ -1753,7 +1786,7 @@ async function handleMaxEvent(update) {
         if (customText) {
             broadcastText = `🚀 <b>Обновление LogBook!</b>\n\n${escapeHtml(customText)}`;
         } else {
-            sendMaxMessage(chatId, '⏳ Загружаю данные о последнем релизе с GitHub...');
+            reply(chatId, '⏳ Загружаю данные о последнем релизе с GitHub...');
             const rel = await getLatestGitHubRelease();
             if (rel) {
                 const tag = escapeHtml(rel.tag_name || 'новой версии');
@@ -1765,7 +1798,7 @@ async function handleMaxEvent(update) {
             }
         }
 
-        sendMaxMessage(chatId, `📢 Начинаю рассылку для <b>${subsList.length}</b> пользователей MAX...`);
+        reply(chatId, `📢 Начинаю рассылку для <b>${subsList.length}</b> пользователей MAX...`);
 
         let success = 0;
         let blocked = 0;
@@ -1804,7 +1837,7 @@ async function handleMaxEvent(update) {
             }
         }
 
-        sendMaxMessage(
+        reply(
             chatId,
             `✅ <b>Рассылка завершена!</b>\n\n• Доставлено: <b>${success}</b>\n• Не доставлено / ошибки: <b>${blocked}</b>`,
             getMaxBackKeyboard()
@@ -1814,7 +1847,7 @@ async function handleMaxEvent(update) {
 
     // Если неизвестная команда со слэшем
     if (text.startsWith('/')) {
-        sendMaxMessage(
+        reply(
             chatId,
             `❓ Неизвестная команда: <code>${escapeHtml(text)}</code>\n\nИспользуйте /start для перехода в главное меню.`,
             getMaxBackKeyboard()

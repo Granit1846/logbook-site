@@ -31,7 +31,8 @@ function getPlatformSession(platform, userId, botToken, publicKey) {
                 try {
                     const data = JSON.parse(text);
                     if (res.statusCode !== 200 || !data.access_token) return resolve(null);
-                    cache.set(cacheKey, { data, expiresAt: Date.now() + 5 * 60 * 1000 });
+                    // Supabase access tokens live 1 hour; reuse them for 50 minutes instead of minting a session per button press.
+                    cache.set(cacheKey, { data, expiresAt: Date.now() + 50 * 60 * 1000 });
                     resolve(data);
                 } catch { resolve(null); }
             });
