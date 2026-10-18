@@ -1487,7 +1487,8 @@ async function handleUpdate(update) {
 
     const chatId = message.chat.id;
     const userId = message.from ? message.from.id : chatId;
-    const text = message.text.trim();
+    // The MAX bot's link button opens /start maxlink_<MAX_ID>; it is the same request as /link <MAX_ID>.
+    const text = message.text.trim().replace(/^\/start\s+maxlink_(\d+)$/, '/link $1');
 
     console.log(`[Сообщение] От: ${chatId} (@${message.from?.username || 'no_user'}): ${text}`);
 

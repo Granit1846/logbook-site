@@ -1461,7 +1461,13 @@ async function handleMaxEvent(update) {
 
         if (authCode) {
             if (authCode.startsWith('link_')) {
-                reply(chatId, 'Для привязки используйте /link в Telegram-боте и подтвердите код здесь.');
+                // Only MAX knows this user's MAX ID, so the button carries it to the Telegram bot, which issues the code.
+                reply(chatId,
+                    `🔗 <b>Привязка Telegram</b>\n\nВаш MAX ID: <code>${userId}</code>\n\n` +
+                    `1. Нажмите кнопку ниже — Telegram-бот пришлёт код.\n2. Отправьте код сюда командой <code>/link КОД</code>.`,
+                    [{ type: 'inline_keyboard', payload: { buttons: [[
+                        { type: 'link', text: '✈️ Открыть Telegram-бот', url: `https://t.me/my_logbook_app_bot?start=maxlink_${userId}` }
+                    ]] } }]);
                 return;
             }
 
