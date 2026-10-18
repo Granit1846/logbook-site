@@ -196,47 +196,6 @@ export const TelegramMiniApp: React.FC = () => {
                   <>
                     <div className="rounded-xl bg-[#1C1C1E] p-3"><span className="block text-[10px] uppercase text-[#777]">Активный аккаунт</span><span className="mt-1 block break-all font-semibold text-[#F0F0F0]">{user.email}</span></div>
                     <button onClick={() => void loadCloudProfiles()} disabled={cloudLoading} className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#229ED9] font-semibold text-white disabled:opacity-50"><RefreshCw className={`h-4 w-4 ${cloudLoading ? 'animate-spin' : ''}`} />Обновить данные из Supabase</button>
-                    <button
-                      onClick={async () => {
-                        setCloudLoading(true);
-                        try {
-                          const result = await TelegramMiniAppService.repairCloudFlightDates();
-                          alert(result.dates || result.mergedDays
-                            ? `Даты восстановлены: ${result.dates}, объединено дней: ${result.mergedDays}. Теперь запустите синхронизацию в LogBook.`
-                            : 'Даты полётов в облаке уже в порядке.');
-                        } catch (error) {
-                          alert(error instanceof Error ? error.message : 'Не удалось восстановить даты полётов');
-                        } finally {
-                          setCloudLoading(false);
-                        }
-                      }}
-                      disabled={cloudLoading}
-                      className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-[#229ED9]/40 bg-[#229ED9]/10 font-semibold text-[#73C7F0] disabled:opacity-50"
-                    >
-                      Восстановить даты полётов
-                    </button>
-                    <button
-                      onClick={async () => {
-                        triggerHaptic('medium');
-                        if (!window.confirm('Очистить записи полётов (дни/запуски) в облаке Supabase? Сами профили и ресурсы останутся нетронутыми.')) return;
-                        try {
-                          setCloudLoading(true);
-                          const res = await TelegramMiniAppService.clearCloudDays();
-                          triggerHaptic('heavy');
-                          alert(`Облачные дни успешно очищены (ревизия ${res.revision})! Теперь синхронизация в приложении пройдет чисто.`);
-                          void loadCloudProfiles();
-                        } catch (e: unknown) {
-                          const msg = e instanceof Error ? e.message : String(e);
-                          alert(`Ошибка очистки: ${msg}`);
-                        } finally {
-                          setCloudLoading(false);
-                        }
-                      }}
-                      disabled={cloudLoading}
-                      className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-[#FF453A]/40 bg-[#FF453A]/10 font-semibold text-[#FF453A] transition-colors hover:bg-[#FF453A]/20 disabled:opacity-50"
-                    >
-                      Очистить облачные дни (временная)
-                    </button>
                     <button onClick={() => void signOut()} className="h-11 w-full rounded-xl border border-[#3A3A3C] text-[#CCC]">Выйти из аккаунта</button>
                   </>
                 ) : (
