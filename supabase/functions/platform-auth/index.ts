@@ -3,6 +3,8 @@
 const allowedOrigins = new Set([
   'https://logbook-site-five.vercel.app',
   'https://logbook-telegram-app.vercel.app',
+  // *.vercel.app is unreachable from Russian networks, so the MAX Mini App is also served from GitHub Pages.
+  'https://granit1846.github.io',
 ]);
 
 const encoder = new TextEncoder();
