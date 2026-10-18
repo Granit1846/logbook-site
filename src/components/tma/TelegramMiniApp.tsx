@@ -241,17 +241,15 @@ export const TelegramMiniApp: React.FC = () => {
     }
 
     // 2. MAX Bridge инициализация (сигнал ready для мобильного клиента MAX)
-    if (isRunningInMax()) {
-      const max = getMaxWebApp();
-      if (max) {
-        try {
-          max.ready?.();
-          max.expand?.();
-          max.setHeaderColor?.('#1C1C1E');
-          max.setBackgroundColor?.('#1C1C1E');
-        } catch {
-          // ignore
-        }
+    const max = getMaxWebApp();
+    if (max) {
+      try {
+        max.ready?.();
+        max.expand?.();
+        max.setHeaderColor?.('#1C1C1E');
+        max.setBackgroundColor?.('#1C1C1E');
+      } catch {
+        // ignore
       }
     }
   }, []);

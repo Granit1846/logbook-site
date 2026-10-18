@@ -804,4 +804,10 @@ var f = class {
 	}
 }();
 window.WebApp = x;
+try {
+	if (typeof window !== "undefined" && (window.WebViewHandler || window.self !== window.top)) {
+		x.ready();
+		x.expand?.();
+	}
+} catch {}
 //#endregion

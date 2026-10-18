@@ -122,9 +122,35 @@ export function isRunningInTelegram(): boolean {
 
 export function isRunningInMax(): boolean {
   if (typeof window === 'undefined') return false;
-  const max = window.WebApp;
+
+  // 1. Нативный WebView MAX (Android/iOS внедряет window.WebViewHandler)
+  if (typeof (window as unknown as { WebViewHandler?: unknown }).WebViewHandler !== 'undefined') {
+    return true;
+  }
+
+  // 2. Запуск во фрейме на веб-платформе MAX
+  if (window.self !== window.top) {
+    return true;
+  }
+
+  // 3. User-Agent
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
-  return Boolean(max && (max.initData || max.initDataUnsafe?.user || max.platform)) || /MAX/i.test(ua);
+  if (/MAX/i.test(ua)) return true;
+
+  // 4. Наличие параметров WebAppData / WebAppPlatform в URL
+  try {
+    const full = window.location.href;
+    if (/WebAppData|WebAppPlatform/i.test(full)) return true;
+    if (window.location.hash.toLowerCase().includes('max') || window.location.search.toLowerCase().includes('max')) return true;
+  } catch {}
+
+  // 5. Объект WebApp
+  const max = window.WebApp;
+  if (max && (max.initData || max.platform || max.initDataUnsafe?.user || max.initDataUnsafe?.chat)) {
+    return true;
+  }
+
+  return false;
 }
 
 export function getAppPlatformUser(): TelegramUser | null {
