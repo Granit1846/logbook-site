@@ -4,7 +4,7 @@ import {
   AlertCircle, Clock,
 } from 'lucide-react';
 import { LaunchCard } from './LaunchCard';
-import { triggerHaptic, triggerHapticNotification, getTelegramWebApp } from '@/lib/telegram';
+import { triggerHaptic, triggerHapticNotification, getTelegramWebApp, isRunningInTelegram } from '@/lib/telegram';
 import { TelegramMiniAppService, type FlightEntryDraft, type LaunchDraft, type SnkDraft } from '@/lib/tmaService';
 
 interface FlightsTabProps {
@@ -108,26 +108,35 @@ export const FlightsTab: React.FC<FlightsTabProps> = ({ activeBoard }) => {
       const result = await TelegramMiniAppService.submitFlightToCloud(flightData);
       triggerHapticNotification('success');
 
-      const tg = getTelegramWebApp();
       const successMsg = result.addedLaunches === 0
         ? 'Этот запуск уже записан. Повтор не добавлен.'
         : result.skippedDuplicates > 0
         ? `Добавлено запусков: ${result.addedLaunches}. Повторы пропущены. Синхронизируйте LogBook.`
         : 'Полёты отправлены. Запустите синхронизацию в LogBook на телефоне или ПК.';
-      if (tg?.showAlert) {
-        tg.showAlert(successMsg);
-      }
-      setStatusMessage({ text: successMsg, type: 'success' });
 
+      setStatusMessage({ text: successMsg, type: 'success' });
       setLaunches([createLaunch(Date.now().toString())]);
       setSnk({});
+
+      if (isRunningInTelegram()) {
+        try {
+          const tg = getTelegramWebApp();
+          if (tg && typeof tg.showAlert === 'function') {
+            tg.showAlert(successMsg);
+          }
+        } catch {}
+      }
     } catch (err) {
       triggerHapticNotification('error');
       const errText = err instanceof Error ? err.message : 'Ошибка отправки данных';
       setStatusMessage({ text: errText, type: 'error' });
-      const tg = getTelegramWebApp();
-      if (tg?.showAlert) {
-        tg.showAlert(errText);
+      if (isRunningInTelegram()) {
+        try {
+          const tg = getTelegramWebApp();
+          if (tg && typeof tg.showAlert === 'function') {
+            tg.showAlert(errText);
+          }
+        } catch {}
       }
     } finally {
       setIsSubmitting(false);

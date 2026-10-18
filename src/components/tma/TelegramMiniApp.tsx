@@ -226,28 +226,32 @@ export const TelegramMiniApp: React.FC = () => {
 
   useEffect(() => {
     // 1. Telegram WebApp инициализация
-    const tg = getTelegramWebApp();
-    if (tg) {
-      tg.ready();
-      tg.expand();
-      try {
-        tg.setHeaderColor?.('#1C1C1E');
-        tg.setBackgroundColor?.('#1C1C1E');
-      } catch {
-        // ignore
+    if (isRunningInTelegram()) {
+      const tg = getTelegramWebApp();
+      if (tg) {
+        try {
+          tg.ready();
+          tg.expand();
+          tg.setHeaderColor?.('#1C1C1E');
+          tg.setBackgroundColor?.('#1C1C1E');
+        } catch {
+          // ignore
+        }
       }
     }
 
     // 2. MAX Bridge инициализация (сигнал ready для мобильного клиента MAX)
-    const max = getMaxWebApp();
-    if (max) {
-      try {
-        max.ready?.();
-        max.expand?.();
-        max.setHeaderColor?.('#1C1C1E');
-        max.setBackgroundColor?.('#1C1C1E');
-      } catch {
-        // ignore
+    if (isRunningInMax()) {
+      const max = getMaxWebApp();
+      if (max) {
+        try {
+          max.ready?.();
+          max.expand?.();
+          max.setHeaderColor?.('#1C1C1E');
+          max.setBackgroundColor?.('#1C1C1E');
+        } catch {
+          // ignore
+        }
       }
     }
   }, []);
@@ -289,7 +293,7 @@ export const TelegramMiniApp: React.FC = () => {
     <div className="relative mx-auto flex min-h-screen max-w-md select-none flex-col bg-[#1C1C1E] text-[#F0F0F0]">
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-[#3A3A3C] bg-[#2A2A2D] px-3">
         <div className="flex min-w-0 items-center gap-2">
-          <button onClick={() => { triggerHaptic('light'); if (inTelegram) getTelegramWebApp()?.close(); else { window.location.hash = ''; window.location.href = window.location.pathname; } }} className="-ml-1 flex h-11 w-11 items-center justify-center rounded-lg hover:bg-white/5" aria-label="Назад"><ChevronLeft className="h-6 w-6" /></button>
+          <button onClick={() => { triggerHaptic('light'); if (inTelegram) { try { getTelegramWebApp()?.close(); } catch {} } else if (inMax) { try { getMaxWebApp()?.close(); } catch {} } else { window.location.hash = ''; window.location.href = window.location.pathname; } }} className="-ml-1 flex h-11 w-11 items-center justify-center rounded-lg hover:bg-white/5" aria-label="Назад"><ChevronLeft className="h-6 w-6" /></button>
           <span className="truncate text-[15px] font-semibold tracking-wide">{selectedBoard || '—'} / {tabLabel}</span>
         </div>
         <div className="flex items-center gap-1">

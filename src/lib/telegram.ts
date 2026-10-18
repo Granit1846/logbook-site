@@ -181,24 +181,30 @@ export function getAppPlatformUser(): TelegramUser | null {
 }
 
 export function triggerHaptic(style: 'light' | 'medium' | 'heavy' = 'light') {
-  const tg = getTelegramWebApp();
-  if (tg?.HapticFeedback) {
-    try {
-      tg.HapticFeedback.impactOccurred(style);
-    } catch {
-      // ignore
+  try {
+    if (isRunningInMax()) {
+      const max = getMaxWebApp();
+      max?.HapticFeedback?.impactOccurred?.(style);
+    } else if (isRunningInTelegram()) {
+      const tg = getTelegramWebApp();
+      tg?.HapticFeedback?.impactOccurred?.(style);
     }
+  } catch {
+    // ignore
   }
 }
 
 export function triggerHapticNotification(type: 'success' | 'warning' | 'error') {
-  const tg = getTelegramWebApp();
-  if (tg?.HapticFeedback) {
-    try {
-      tg.HapticFeedback.notificationOccurred(type);
-    } catch {
-      // ignore
+  try {
+    if (isRunningInMax()) {
+      const max = getMaxWebApp();
+      max?.HapticFeedback?.notificationOccurred?.(type);
+    } else if (isRunningInTelegram()) {
+      const tg = getTelegramWebApp();
+      tg?.HapticFeedback?.notificationOccurred?.(type);
     }
+  } catch {
+    // ignore
   }
 }
 
