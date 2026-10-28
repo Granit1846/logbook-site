@@ -37,6 +37,7 @@ const sections: FooterSection[] = [
       { label: 'Репозиторий LogBook-PC', href: 'https://github.com/Granit1846/LogBook-PC', external: true },
       { label: 'Краткое руководство', href: '#docs' },
       { label: 'Частые вопросы (FAQ)', href: '#faq' },
+      { label: 'Политика конфиденциальности', href: '/privacy.html' },
     ],
   },
 ];
