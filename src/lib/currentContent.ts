@@ -234,7 +234,7 @@ export const defaultScreenshots: ScreenshotRow[] = [
   {
     id: 'desktop-profile',
     title: 'Выбор и создание техники (ПК)',
-    description: 'Каталог иконок вертолётов и лёгкое переключение между бортами.',
+    description: 'Каталог иконок воздушных судов и лёгкое переключение между бортами.',
     imageUrl: '/screenshots/desktop_profile_create.png',
     category: 'desktop',
     color: '#1D1D21',

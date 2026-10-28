@@ -29,7 +29,7 @@ const localCurrent: Record<'windows' | 'android', ReleaseManifest> = {
     url: '/downloads/LogBook.apk',
     directUrl: '/downloads/LogBook.apk',
     githubUrl: 'https://github.com/Granit1846/LogBook-Android/releases',
-    notes: 'Мобильный LogBook для Android 8.0+. Синхронизация потягиванием экрана и автоповтор на нестабильной сети, даты ресурсов с полным годом, формуляры вертолета (ВК-2500, ВР-80, ТА-14), журнал ТО, вход через MAX, Telegram и Email.',
+    notes: 'Мобильный LogBook для Android 8.0+. Синхронизация потягиванием экрана и автоповтор на нестабильной сети, даты ресурсов с полным годом, формуляры агрегатов (ВК-2500, ВР-80, ТА-14), журнал ТО, вход через MAX, Telegram и Email.',
     sizeBytes: 22651065,
     builtAt: '2026-10-18T20:25:00.000Z',
   },

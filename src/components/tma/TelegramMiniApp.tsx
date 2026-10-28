@@ -207,7 +207,7 @@ export const TelegramMiniApp: React.FC = () => {
                   <div className="space-y-3">
                     <div className="space-y-2 rounded-xl bg-[#1C1C1E] p-3 border border-[#229ED9]/30">
                       <span className="block text-[11px] font-semibold text-[#229ED9]">
-                        ✈️ Профиль пилота LogBook (MAX / Telegram)
+                        ✈️ Профиль LogBook (MAX / Telegram)
                       </span>
                       <p className="text-[11px] text-[#AAA]">
                         Вход подтверждается при открытии приложения через кнопку бота MAX или Telegram.

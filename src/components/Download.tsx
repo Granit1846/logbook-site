@@ -326,7 +326,7 @@ function TelegramCard() {
                   </li>
                   <li className="flex items-start gap-2">
                     <CheckCircle2 className="w-4 h-4 text-[#2AABEE] shrink-0 mt-0.5" />
-                    <span><strong>Оповещения об обновлениях:</strong> рассылка новых версий приложений инженерам и пилотам.</span>
+                    <span><strong>Оповещения об обновлениях:</strong> рассылка новых версий приложений бортовым техникам и инженерам АК.</span>
                   </li>
                 </ul>
               </div>
